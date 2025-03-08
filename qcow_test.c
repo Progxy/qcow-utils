@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2025 TheProgxy <theprogxy@gmail.com>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -40,7 +57,7 @@ int main(int argc, char* argv[]) {
 	unsigned char data[32] = {0};
 	data[7] = 0x07;
 	data[10] = 0x10;
-	ssize_t ret = qwrite(data, sizeof(unsigned char), 32, offset, qcow_metadata);
+	int ret = qwrite(data, sizeof(unsigned char), 32, offset, qcow_metadata);
 	if (ret < 0) {
 		WARNING_LOG("Failed to write %u bytes at address 0x%lX, err: '%s'\n", 32, offset, qcow_errors_str[-ret]);
 		deallocate_qcow_metadata(&qcow_metadata);

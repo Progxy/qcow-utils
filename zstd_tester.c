@@ -1,6 +1,22 @@
+/*
+ * Copyright (C) 2025 TheProgxy <theprogxy@gmail.com>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
-
 #include "utils.h"
 #include "./zstd.h"
 
@@ -21,14 +37,14 @@ int main(int argc, char* argv[]) {
 	}
 
 	fseek(test_file, 0, SEEK_END);
-	ssize_t file_size = ftell(test_file);
+	long file_size = ftell(test_file);
 	fseek(test_file, 0, SEEK_SET);
 
 	DEBUG_LOG("File size: %lu\n", file_size);
 	
 	size_t file_err = 0;
 	unsigned char* test_data = (unsigned char*) calloc(file_size, sizeof(unsigned char));
-	if (((ssize_t)(file_err = fread(test_data, sizeof(unsigned char), file_size, test_file)) != file_size)) {
+	if (((long)(file_err = fread(test_data, sizeof(unsigned char), file_size, test_file)) != file_size)) {
 		PERROR_LOG("Failed to read from the test file");
 		free(test_data);
 		fclose(test_file);
@@ -54,7 +70,7 @@ int main(int argc, char* argv[]) {
 		}
 		
 		file_err = 0;
-		if (((ssize_t)(file_err = fwrite(zstd_decompressed_data, sizeof(unsigned char), zstd_decompressed_data_length, out_file)) != zstd_decompressed_data_length)) {
+		if (((long)(file_err = fwrite(zstd_decompressed_data, sizeof(unsigned char), zstd_decompressed_data_length, out_file)) != zstd_decompressed_data_length)) {
 			PERROR_LOG("Failed to write from the out file");
 			free(zstd_decompressed_data);
 			fclose(out_file);
