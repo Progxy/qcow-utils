@@ -66,7 +66,7 @@ int main(int argc, char* argv[]) {
 
 	ret = qread(data, sizeof(unsigned char), 32, offset, qcow_metadata);
 	if (ret < 0) {
-		WARNING_LOG("Failed to read %u bytes at LBA 0x%lX, ret: %ld - '%s'\n", 32, offset, ret, qcow_errors_str[-ret]);
+		WARNING_LOG("Failed to read %u bytes at LBA 0x%lX, ret: %d - '%s'\n", 32, offset, ret, qcow_errors_str[-ret]);
 		deallocate_qcow_metadata(&qcow_metadata);
 		return -1;
 	}

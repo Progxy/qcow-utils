@@ -16,6 +16,9 @@ NOTE: at the moment we do not offer a make target to compile it into a dynamic/s
 
 Once included just call the exposed functions: `qread` and `qwrite` to perform reading and writing operations.
 
+### Note
+The utility has been tested with the [Arch Linux](https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-basic.qcow2) base qcow
+
 ## References
 - [qcow format specification](https://github.com/zchee/go-qcow2/blob/master/docs/specification.md) 
 - [qemu official specification](https://github.com/qemu/qemu/blob/master/docs/interop/qcow2.txt)
