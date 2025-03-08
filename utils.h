@@ -32,6 +32,10 @@
 #include "./str_error.h"
 #define PERROR_LOG(format, ...) printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", BRIGHT_YELLOW) format ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error())
 
+/* -------------------------------------------------------------------------------------------------------- */
+// --------
+//  Macros 
+// --------
 #define BOOL2STR(cond) (cond ? COLOR_STR("TRUE", GREEN) : COLOR_STR("FALSE", RED))
 #define ARR_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #define UNUSED_FUNCTION __attribute__((unused))
@@ -40,9 +44,13 @@
 #define UNUSED_VAR(var) (void) var
 #define MIN(a, b) (a < b ? a : b)
 #define MAX(a, b) (a > b ? a : b)
-#define FALSE       0
-#define TRUE        1
+#define FALSE 0
+#define TRUE  1
 
+/* -------------------------------------------------------------------------------------------------------- */
+// ------------------
+//  Macros Functions
+// ------------------
 #define BE_CONVERT(ptr_val, size) be_to_le(ptr_val, size)
 #if defined(__BYTE_ORDER) && __BYTE_ORDER == __LITTLE_ENDIAN || \
     defined(__LITTLE_ENDIAN__) || \
@@ -50,7 +58,7 @@
     defined(__THUMBEL__) || \
     defined(__AARCH64EL__) || \
     defined(_MIPSEL) || defined(__MIPSEL) || defined(__MIPSEL__)
- 	
+
 	UNUSED_FUNCTION static void be_to_le(void* ptr_val, size_t size) {
         for (size_t i = 0; i < size / 2; ++i) {
             unsigned char temp = CAST_PTR(ptr_val, unsigned char)[i];
@@ -71,9 +79,21 @@
 		for (unsigned int i = 0; i < ARR_SIZE(ptrs); ++i) SAFE_FREE(ptrs[i]);	\
 	} while(0)
 
+/* -------------------------------------------------------------------------------------------------------- */
+// ------------------------
+//  Functions Declarations
+// ------------------------
 #define mem_set(ptr, value, size) mem_set_var(ptr, value, size, sizeof(unsigned char))
 #define mem_set_32(ptr, value, size) mem_set_var(ptr, value, size * sizeof(unsigned int), sizeof(unsigned int))
 #define mem_set_64(ptr, value, size) mem_set_var(ptr, value, size * sizeof(unsigned long long int), sizeof(unsigned long long int))
+static void mem_set_var(void* ptr, int value, size_t size, size_t val_size);
+static void* mem_cpy(void* dest, const void* src, size_t size);
+static void mem_move(void* dest, const void* src, size_t size);
+UNUSED_FUNCTION static int mem_n_cmp(const void* ptr1, const void* ptr2, size_t n);
+UNUSED_FUNCTION static size_t str_len(const char* str);
+UNUSED_FUNCTION static int str_n_cmp(const char* str1, const char* str2, size_t n);
+
+/* -------------------------------------------------------------------------------------------------------- */
 static void mem_set_var(void* ptr, int value, size_t size, size_t val_size) {
 	if (ptr == NULL) return;
 	for (size_t i = 0; i < size; ++i) CAST_PTR(ptr, unsigned char)[i] = CAST_PTR(&value, unsigned char)[i % val_size]; 

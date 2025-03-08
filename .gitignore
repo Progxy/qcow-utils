@@ -1,5 +1,5 @@
 *.qcow*
-qcow2img_test
+qcow_test
 deflate_test
 inflate_test
 zstd_tester

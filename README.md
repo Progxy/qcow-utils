@@ -16,9 +16,6 @@ NOTE: at the moment we do not offer a make target to compile it into a dynamic/s
 
 Once included just call the exposed functions: `qread` and `qwrite` to perform reading and writing operations.
 
-## INFO
-This folder contains the images of the OSes supported (currently only Arch Linux, which is still under testing). 
-
 ## References
 - [qcow format specification](https://github.com/zchee/go-qcow2/blob/master/docs/specification.md) 
 - [qemu official specification](https://github.com/qemu/qemu/blob/master/docs/interop/qcow2.txt)
