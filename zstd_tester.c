@@ -1,0 +1,71 @@
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "utils.h"
+#include "./zstd.h"
+
+int main(int argc, char* argv[]) {
+	if (argc > 3) {
+		printf("Usage: zstd_tester <file> [<out_file>]\n");
+		return -1;
+	}
+	
+	const char* file_path = argv[1];
+	const char* out_file_path = (argc > 2) ? argv[2] : NULL;
+	DEBUG_LOG("Decoding '%s' to '%s'...\n", file_path, out_file_path == NULL ? "stdin" : out_file_path);
+
+	FILE* test_file = NULL;
+	if ((test_file = fopen(file_path, "rb")) == NULL) {
+		PERROR_LOG("Failed to open the test file");
+		return -1;
+	}
+
+	fseek(test_file, 0, SEEK_END);
+	ssize_t file_size = ftell(test_file);
+	fseek(test_file, 0, SEEK_SET);
+
+	DEBUG_LOG("File size: %lu\n", file_size);
+	
+	size_t file_err = 0;
+	unsigned char* test_data = (unsigned char*) calloc(file_size, sizeof(unsigned char));
+	if (((ssize_t)(file_err = fread(test_data, sizeof(unsigned char), file_size, test_file)) != file_size)) {
+		PERROR_LOG("Failed to read from the test file");
+		free(test_data);
+		fclose(test_file);
+		return -1;
+	} 	
+	
+	fclose(test_file);
+
+	int err = 0;
+	unsigned int zstd_decompressed_data_length = 0;
+	unsigned char* zstd_decompressed_data = zstd_inflate((unsigned char*) test_data, file_size, &zstd_decompressed_data_length, &err);
+	if (err) {
+		printf(COLOR_STR("ZSTD_ERROR::%s: ", RED) "%s", zstd_errors_str[-err], zstd_decompressed_data);
+		return err;
+	} 
+	
+	if (out_file_path == NULL) printf("ZSTD decompressed data: '%.*s'\n", zstd_decompressed_data_length, zstd_decompressed_data);
+	else {
+		FILE* out_file = NULL;
+		if ((out_file = fopen(out_file_path, "wb")) == NULL) {
+			PERROR_LOG("Failed to open the out file");
+			return -1;
+		}
+		
+		file_err = 0;
+		if (((ssize_t)(file_err = fwrite(zstd_decompressed_data, sizeof(unsigned char), zstd_decompressed_data_length, out_file)) != zstd_decompressed_data_length)) {
+			PERROR_LOG("Failed to write from the out file");
+			free(zstd_decompressed_data);
+			fclose(out_file);
+			return -1;
+		}
+
+		fclose(out_file);
+	}
+	
+	free(zstd_decompressed_data);
+	
+	return 0;
+}
+
