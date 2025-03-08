@@ -207,7 +207,7 @@ static int parse_ref_cnt_table(QCowMetadata* qcow_metadata);
 static int parse_l1_table(QCowMetadata* qcow_metadata);
 static int parse_qcow_header(QCowMetadata* qcow_metadata, QCowHeader* qcow_header);
 static int init_qcow_img(QCowMetadata* qcow_metadata, const char* path_qcow);
-static int parse_qcow(QCowMetadata* qcow_metadata, const char* path_qcow);
+int parse_qcow(QCowMetadata* qcow_metadata, const char* path_qcow);
 static inline int get_ref_cnt(QCowMetadata qcow_metadata, uint64_t offset, uint64_t* ref_cnt);
 static int allocate_ref_cnt_table(QCowMetadata qcow_metadata, uint64_t refcount_table_index);
 static int update_ref_cnt(QCowMetadata qcow_metadata, uint64_t offset, uint64_t new_ref_cnt);
@@ -847,7 +847,7 @@ static int init_raw_external_data(QCowMetadata* qcow_metadata, QCowHeaderExtensi
 	return QCOW_NO_ERROR;
 }
 
-static int parse_qcow(QCowMetadata* qcow_metadata, const char* path_qcow) {
+int parse_qcow(QCowMetadata* qcow_metadata, const char* path_qcow) {
 	int err = 0;
 	if ((err = init_qcow_img(qcow_metadata, path_qcow)) < 0) {
 		deallocate_qcow_metadata(qcow_metadata);
