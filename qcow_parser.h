@@ -1,5 +1,5 @@
-#ifndef _QCOW2IMG_H_
-#define _QCOW2IMG_H_
+#ifndef _QCOW_PARSER_H_
+#define _QCOW_PARSER_H_
 
 #include "./utils.h"
 #include "./zlib.h"
@@ -1519,4 +1519,4 @@ int qread(void* ptr, size_t size, size_t nmemb, unsigned int offset, QCowMetadat
 	return QCOW_NO_ERROR; 
 }
 
-#endif // _QCOW2IMG_H_
+#endif // _QCOW_PARSER_H_

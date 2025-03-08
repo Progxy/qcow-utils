@@ -1,7 +1,7 @@
 FLAGS = -std=gnu11 -Wall -Wextra -pedantic -ggdb
 DEFINITIONS = -D_DEBUG
 
-qcow2img_test: qcow2img_test.c qcow2img.h zlib.h zstd.h bitstream.h utils.h
+qcow_test: qcow_test.c qcow_parser.h zlib.h zstd.h bitstream.h utils.h
 	gcc $(FLAGS) $(DEFINITIONS) $< -o $@
 
 inflate_test: inflate_test.c zlib.h zstd.h bitstream.h utils.h

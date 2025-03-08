@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include "./qcow2img.h"
+#include "./qcow_parser.h"
 
 int contains_substr(const char* str, const char* substr) {
 	for (unsigned int i = 0; str[i] != '\0'; ++i) {
