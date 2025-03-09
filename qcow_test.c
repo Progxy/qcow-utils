@@ -38,10 +38,10 @@ int contains_substr(const char* str, const char* substr) {
 
 int main(int argc, char* argv[]) {
 	if (argc < 2) {
-		printf("Usage: %s <path to qcow image>\n", argv[0]);
+		WARNING_LOG("Usage: %s <path to qcow image>\n", argv[0]);
 		return -1;
 	} else if (!contains_substr(argv[1], ".qcow")) {
-		printf("ERROR: Only qcow files are accepted.\n");
+		WARNING_LOG("ERROR: Only qcow files are accepted.\n");
 		return -1;
 	}
 
@@ -49,7 +49,7 @@ int main(int argc, char* argv[]) {
 	
 	QCowMetadata qcow_metadata = {0};
 	if (parse_qcow(&qcow_metadata, path_qcow) < 0) {
-		printf("Failed to parse the qcow image.\n");
+		WARNING_LOG("Failed to parse the qcow image.\n");
 		return -1;
 	}
 	
