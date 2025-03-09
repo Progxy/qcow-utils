@@ -17,6 +17,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+
+#define _QCOW_PRINTING_UTILS_
+#define _QCOW_UTILS_IMPLEMENTATION_
 #include "./utils.h"
 #include "./zlib.h"
 #include "./zstd.h"

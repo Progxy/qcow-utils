@@ -34,7 +34,7 @@
 	do {																			\
 		value = bitstream_read_next_bit((bit_stream));								\
 		 if ((bit_stream) -> error) {												\
-	 	 	MULTI_FREE(__VA_ARGS__);												\
+	 	 	QCOW_MULTI_FREE(__VA_ARGS__);												\
 		 	WARNING_LOG("An error occurred while reading from the bitstream.\n");	\
 		 	return -BITSTREAM_IO_ERROR;												\
 		 }																			\
@@ -45,7 +45,7 @@
 	do {																			\
 		value = bitstream_read_bits((bit_stream), (nb_bits));						\
 		 if ((bit_stream) -> error) {												\
-	 	 	MULTI_FREE(__VA_ARGS__);												\
+	 	 	QCOW_MULTI_FREE(__VA_ARGS__);												\
 		 	WARNING_LOG("An error occurred while reading from the bitstream.\n");	\
 		 	return -BITSTREAM_IO_ERROR;												\
 		 }																			\
@@ -56,7 +56,7 @@
 	do {																			\
 		void* _tmp = bitstream_read_bytes((bit_stream), (size), (nmemb));			\
 		 if (_tmp == NULL) {														\
-	 	 	MULTI_FREE(__VA_ARGS__);												\
+	 	 	QCOW_MULTI_FREE(__VA_ARGS__);												\
 		 	WARNING_LOG("An error occurred while reading from the bitstream.\n");	\
 		 	return -BITSTREAM_IO_ERROR;												\
 		 }																			\
@@ -68,18 +68,18 @@
 	do {																			\
 		void* _tmp = bitstream_read_bytes((bit_stream), (size), (nmemb));			\
 		 if (_tmp == NULL) {														\
-	 	 	MULTI_FREE(__VA_ARGS__);												\
+	 	 	QCOW_MULTI_FREE(__VA_ARGS__);												\
 		 	WARNING_LOG("An error occurred while reading from the bitstream.\n");	\
 		 	return -BITSTREAM_IO_ERROR;												\
 		 }																			\
-		 var = *CAST_PTR(_tmp, type);												\
+		 var = *QCOW_CAST_PTR(_tmp, type);												\
 	} while (0)
 
 #define SAFE_NEXT_BIT_WRITE(bit_stream, bit, ...) 									\
 	do {																			\
 		bitstream_write_next_bit((bit_stream), (bit));								\
 		if ((bit_stream) -> error) {												\
-	 	 	MULTI_FREE(__VA_ARGS__);												\
+	 	 	QCOW_MULTI_FREE(__VA_ARGS__);												\
 		 	WARNING_LOG("An error occurred while writing to the bitstream.\n");		\
 		 	return -BITSTREAM_IO_ERROR;												\
 		 }																			\
@@ -109,7 +109,7 @@
 	do {																			\
 		bitstream_write_bytes((bit_stream), (size), (nmemb), var);					\
 		 if ((bit_stream) -> error) {												\
-	 	 	MULTI_FREE(__VA_ARGS__);												\
+	 	 	QCOW_MULTI_FREE(__VA_ARGS__);												\
 		 	WARNING_LOG("An error occurred while writing to the bitstream.\n");		\
 		 	return -BITSTREAM_IO_ERROR;												\
 		 }																			\
@@ -448,7 +448,7 @@ UNUSED_FUNCTION static void bitstream_write_bits(BitStream* bit_stream, unsigned
 }
 
 UNUSED_FUNCTION static void deallocate_bit_stream(BitStream* bit_stream) {
-	SAFE_FREE(bit_stream -> stream);
+	QCOW_SAFE_FREE(bit_stream -> stream);
 	bit_stream -> stream = NULL;
 	bit_stream -> byte_pos = 0;
 	bit_stream -> bit_pos = 0;

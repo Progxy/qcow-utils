@@ -18,16 +18,14 @@
 #ifndef _QCOW_UTILS_H_
 #define _QCOW_UTILS_H_
 
+#ifdef _QCOW_PRINTING_UTILS_
 // -------------------------------
 // Printing Macros
 // -------------------------------
 #define RED           "\033[31m"
 #define GREEN         "\033[32m"
-#define YELLOW        "\033[33m"
-#define BLUE          "\033[34m"
 #define PURPLE        "\033[35m"
 #define CYAN          "\033[36m"
-#define WHITE         "\033[37m"
 #define BRIGHT_YELLOW "\033[38;5;214m"    
 #define RESET_COLOR   "\033[0m"
 
@@ -49,26 +47,39 @@
 #include "./str_error.h"
 #define PERROR_LOG(format, ...) printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", BRIGHT_YELLOW) format ", because: " COLOR_STR("'%s'", BRIGHT_YELLOW) ".\n", __LINE__, ##__VA_ARGS__, str_error())
 
+#endif //_QCOW_PRINTING_UTILS_
+
 /* -------------------------------------------------------------------------------------------------------- */
 // --------
 //  Macros 
 // --------
-#define BOOL2STR(cond) (cond ? COLOR_STR("TRUE", GREEN) : COLOR_STR("FALSE", RED))
-#define ARR_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
-#define UNUSED_FUNCTION __attribute__((unused))
-#define PACKED_STRUCT __attribute__((packed))
-#define CAST_PTR(ptr, type) ((type*) (ptr))
-#define UNUSED_VAR(var) (void) var
-#define MIN(a, b) (a < b ? a : b)
-#define MAX(a, b) (a > b ? a : b)
-#define FALSE 0
-#define TRUE  1
+#define QCOW_MASK_BITS_INTERVAL(a, b) (((char)(a) >= (char)(b)) ? (QCOW_MASK_BITS_PRECEDING(a) & ~QCOW_MASK_BITS_PRECEDING(b)) : 0)
+#define QCOW_BOOL2STR(cond) (cond ? COLOR_STR("TRUE", GREEN) : COLOR_STR("FALSE", RED))
+#define QCOW_MASK_BITS_PRECEDING(bit_index) ((1ULL << (bit_index)) - 1)
+#define QCOW_ARR_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+#define QCOW_CAST_PTR(ptr, type) ((type*) (ptr))
+
+#ifndef MIN
+	#define MIN(a, b) (a < b ? a : b)
+	#define MAX(a, b) (a > b ? a : b)
+#endif //MIN
+
+#ifndef UNUSED_FUNCTION
+	#define UNUSED_FUNCTION __attribute__((unused))
+	#define PACKED_STRUCT __attribute__((packed))
+	#define UNUSED_VAR(var) (void) var
+#endif //UNUSED_FUNCTION
+
+#ifndef FALSE
+	#define FALSE 0
+	#define TRUE  1
+#endif //FALSE
 
 /* -------------------------------------------------------------------------------------------------------- */
 // ------------------
 //  Macros Functions
 // ------------------
-#define BE_CONVERT(ptr_val, size) be_to_le(ptr_val, size)
+#define QCOW_BE_CONVERT(ptr_val, size) qcow_be_to_le(ptr_val, size)
 #if defined(__BYTE_ORDER) && __BYTE_ORDER == __LITTLE_ENDIAN || \
     defined(__LITTLE_ENDIAN__) || \
     defined(__ARMEL__) || \
@@ -76,24 +87,24 @@
     defined(__AARCH64EL__) || \
     defined(_MIPSEL) || defined(__MIPSEL) || defined(__MIPSEL__)
 
-	UNUSED_FUNCTION static void be_to_le(void* ptr_val, size_t size) {
+	UNUSED_FUNCTION static void qcow_be_to_le(void* ptr_val, size_t size) {
         for (size_t i = 0; i < size / 2; ++i) {
-            unsigned char temp = CAST_PTR(ptr_val, unsigned char)[i];
-            CAST_PTR(ptr_val, unsigned char)[i] = CAST_PTR(ptr_val, unsigned char)[size - 1 - i];
-            CAST_PTR(ptr_val, unsigned char)[size - 1 - i] = temp;
+            unsigned char temp = QCOW_CAST_PTR(ptr_val, unsigned char)[i];
+            QCOW_CAST_PTR(ptr_val, unsigned char)[i] = QCOW_CAST_PTR(ptr_val, unsigned char)[size - 1 - i];
+            QCOW_CAST_PTR(ptr_val, unsigned char)[size - 1 - i] = temp;
         }
         return;
     }
 
 #else
-    #define be_to_le(ptr_val, size)
+    #define qcow_be_to_le(ptr_val, size)
 #endif // CHECK_ENDIANNESS
 
-#define SAFE_FREE(ptr) do { if ((ptr) != NULL) free(ptr), (ptr) = NULL; } while(0)
-#define MULTI_FREE(...) 														\
-	do {																		\
-		void* ptrs[] = { NULL, ##__VA_ARGS__ };							 		\
-		for (unsigned int i = 0; i < ARR_SIZE(ptrs); ++i) SAFE_FREE(ptrs[i]);	\
+#define QCOW_SAFE_FREE(ptr) do { if ((ptr) != NULL) free(ptr), (ptr) = NULL; } while(0)
+#define QCOW_MULTI_FREE(...) 															\
+	do {																				\
+		void* ptrs[] = { NULL, ##__VA_ARGS__ };							 				\
+		for (unsigned int i = 0; i < QCOW_ARR_SIZE(ptrs); ++i) QCOW_SAFE_FREE(ptrs[i]);	\
 	} while(0)
 
 /* -------------------------------------------------------------------------------------------------------- */
@@ -111,15 +122,16 @@ UNUSED_FUNCTION static size_t str_len(const char* str);
 UNUSED_FUNCTION static int str_n_cmp(const char* str1, const char* str2, size_t n);
 
 /* -------------------------------------------------------------------------------------------------------- */
+#ifdef _QCOW_UTILS_IMPLEMENTATION_
 static void mem_set_var(void* ptr, int value, size_t size, size_t val_size) {
 	if (ptr == NULL) return;
-	for (size_t i = 0; i < size; ++i) CAST_PTR(ptr, unsigned char)[i] = CAST_PTR(&value, unsigned char)[i % val_size]; 
+	for (size_t i = 0; i < size; ++i) QCOW_CAST_PTR(ptr, unsigned char)[i] = QCOW_CAST_PTR(&value, unsigned char)[i % val_size]; 
 	return;
 }
 
 static void* mem_cpy(void* dest, const void* src, size_t size) {
 	if (dest == NULL || src == NULL) return NULL;
-	for (size_t i = 0; i < size; ++i) CAST_PTR(dest, unsigned char)[i] = CAST_PTR(src, unsigned char)[i];
+	for (size_t i = 0; i < size; ++i) QCOW_CAST_PTR(dest, unsigned char)[i] = QCOW_CAST_PTR(src, unsigned char)[i];
 	return dest;
 }
 
@@ -128,10 +140,10 @@ static void mem_move(void* dest, const void* src, size_t size) {
     
 	unsigned char* temp = (unsigned char*) calloc(size, sizeof(unsigned char));
 	
-	for (size_t i = 0; i < size; ++i) *CAST_PTR(temp + i, unsigned char) = *CAST_PTR(CAST_PTR(src, unsigned char) + i, unsigned char); 
-    for (size_t i = 0; i < size; ++i) *CAST_PTR(CAST_PTR(dest, unsigned char) + i, unsigned char) = *CAST_PTR(temp + i, unsigned char);
+	for (size_t i = 0; i < size; ++i) *QCOW_CAST_PTR(temp + i, unsigned char) = *QCOW_CAST_PTR(QCOW_CAST_PTR(src, unsigned char) + i, unsigned char); 
+    for (size_t i = 0; i < size; ++i) *QCOW_CAST_PTR(QCOW_CAST_PTR(dest, unsigned char) + i, unsigned char) = *QCOW_CAST_PTR(temp + i, unsigned char);
     
-	SAFE_FREE(temp);
+	QCOW_SAFE_FREE(temp);
     
     return;
 }
@@ -171,6 +183,8 @@ UNUSED_FUNCTION static int str_n_cmp(const char* str1, const char* str2, size_t 
 
 	return 0;
 }
+
+#endif //_QCOW_UTILS_IMPLEMENTATION_
 
 #endif //_QCOW_UTILS_H_
 

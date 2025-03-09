@@ -18,6 +18,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+
+#define _QCOW_PRINTING_UTILS_
+#define _QCOW_UTILS_IMPLEMENTATION_
 #include "./qcow_parser.h"
 
 int contains_substr(const char* str, const char* substr) {

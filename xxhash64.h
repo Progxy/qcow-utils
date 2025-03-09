@@ -78,7 +78,7 @@ uint64_t xxhash64(unsigned char* lane, unsigned int byte_size, OPTIONAL uint64_t
 	
 		while (remaining_size >= 32) {
 			for (unsigned int i = 0; i < 4; ++i, lane += sizeof(uint64_t)) {
-				accs[i] = xxround(accs[i], *CAST_PTR(lane, uint64_t));
+				accs[i] = xxround(accs[i], *QCOW_CAST_PTR(lane, uint64_t));
 			}
 			remaining_size -= 32; 
 		}
@@ -93,13 +93,13 @@ uint64_t xxhash64(unsigned char* lane, unsigned int byte_size, OPTIONAL uint64_t
  	acc += byte_size;
 
 	while (remaining_size >= 8) {
-      acc ^= xxround(0, *CAST_PTR(lane, uint64_t));
+      acc ^= xxround(0, *QCOW_CAST_PTR(lane, uint64_t));
       acc = xxh_rotl64(acc, 27) * PRIME64_1 + PRIME64_4;
       lane += sizeof(uint64_t), remaining_size -= sizeof(uint64_t);
 	}
 
 	if (remaining_size >= 4) {
-      acc ^= (*CAST_PTR(lane, uint32_t) * PRIME64_1);
+      acc ^= (*QCOW_CAST_PTR(lane, uint32_t) * PRIME64_1);
       acc = xxh_rotl64(acc, 23) * PRIME64_2 + PRIME64_3;
 	  lane += sizeof(uint32_t), remaining_size -= sizeof(uint32_t);
 	}

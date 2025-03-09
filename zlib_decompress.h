@@ -134,11 +134,11 @@ unsigned char* zlib_inflate(unsigned char* stream, unsigned int size, unsigned i
 
 static void deallocate_hf_table(HFTable* hf) {
 	if (hf -> is_fixed_hf) return;
-	for (unsigned char i = 1; i <= hf -> max_bit_length; ++i) SAFE_FREE((hf -> values)[i]);
-    SAFE_FREE(hf -> values);
-    SAFE_FREE(hf -> min_codes);
-    SAFE_FREE(hf -> max_codes);
-    SAFE_FREE(hf -> lengths);
+	for (unsigned char i = 1; i <= hf -> max_bit_length; ++i) QCOW_SAFE_FREE((hf -> values)[i]);
+    QCOW_SAFE_FREE(hf -> values);
+    QCOW_SAFE_FREE(hf -> min_codes);
+    QCOW_SAFE_FREE(hf -> max_codes);
+    QCOW_SAFE_FREE(hf -> lengths);
     hf -> max_bit_length = 0;
     hf -> size = 0;
     return;
@@ -201,7 +201,7 @@ static int generate_codes(HFTable* hf) {
 		}
     }
 
-    SAFE_FREE(values_index);
+    QCOW_SAFE_FREE(values_index);
 
     return ZLIB_NO_ERROR;
 }
@@ -245,7 +245,7 @@ static int decode_lengths(BitStream* bit_stream, HFTable decoder_hf, HFTable* li
 	
 	distance_hf -> lengths = (unsigned char*) calloc(distance_hf -> size, sizeof(unsigned char));
     if (distance_hf -> lengths == NULL) {
-		SAFE_FREE(literals_hf -> lengths);
+		QCOW_SAFE_FREE(literals_hf -> lengths);
 		WARNING_LOG("Failed to allocate buffer for distance_hf -> lengths.\n");
 		return -ZLIB_IO_ERROR;
 	}
@@ -256,7 +256,7 @@ static int decode_lengths(BitStream* bit_stream, HFTable decoder_hf, HFTable* li
         int value = decode_hf(bit_stream, code, decoder_hf);
 
 		if (value < 0) {
-			MULTI_FREE(literals_hf -> lengths, distance_hf -> lengths);
+			QCOW_MULTI_FREE(literals_hf -> lengths, distance_hf -> lengths);
 			WARNING_LOG("Corrupted encoded lengths.\n");
 			return value;
 		}
@@ -355,8 +355,8 @@ static int read_uncompressed_data(BitStream* bit_stream, unsigned char** decompr
 	skip_to_next_byte(bit_stream);
 	unsigned short int length = SAFE_BYTE_READ_WITH_CAST(bit_stream, sizeof(unsigned short int), 1, unsigned short int, length, 0);
 	unsigned short int length_c = SAFE_BYTE_READ_WITH_CAST(bit_stream, sizeof(unsigned short int), 1, unsigned short int, length_c, 0);
-	BE_CONVERT(&length, sizeof(unsigned short int));
-    BE_CONVERT(&length_c, sizeof(unsigned short int));
+	QCOW_BE_CONVERT(&length, sizeof(unsigned short int));
+    QCOW_BE_CONVERT(&length_c, sizeof(unsigned short int));
 	unsigned short int check = ((length ^ length_c) + 1) & 0xFFFF;
 
     if (check) {
@@ -375,7 +375,7 @@ static int read_uncompressed_data(BitStream* bit_stream, unsigned char** decompr
 		return -ZLIB_IO_ERROR;
 	}
 
-	BE_CONVERT(*decompressed_data + *decompressed_data_length, length);
+	QCOW_BE_CONVERT(*decompressed_data + *decompressed_data_length, length);
     *decompressed_data_length += length;
     
 	return ZLIB_NO_ERROR;
@@ -453,7 +453,7 @@ static int decode_dynamic_huffman_tables(BitStream* bit_stream, HFTable* literal
     if (literals_hf -> size < HF_LITERALS_SIZE) {
 		literals_hf -> lengths = realloc(literals_hf -> lengths, sizeof(unsigned char) * HF_LITERALS_SIZE);
 		if (literals_hf -> lengths == NULL) {
-			SAFE_FREE(distance_hf -> lengths);
+			QCOW_SAFE_FREE(distance_hf -> lengths);
 			WARNING_LOG("Failed to reallocate the buffer for literals_hf -> lenghts.\n");
 			return -ZLIB_IO_ERROR;
 		}
@@ -465,7 +465,7 @@ static int decode_dynamic_huffman_tables(BitStream* bit_stream, HFTable* literal
 	if (distance_hf -> size < HF_DISTANCE_SIZE) {
 		distance_hf -> lengths = realloc(distance_hf -> lengths, sizeof(unsigned char) * HF_DISTANCE_SIZE);
 		if (distance_hf -> lengths == NULL) {
-			SAFE_FREE(literals_hf -> lengths);
+			QCOW_SAFE_FREE(literals_hf -> lengths);
 			WARNING_LOG("Failed to reallocate the buffer for distance_hf -> lenghts.\n");
 			return -ZLIB_IO_ERROR;
 		}
@@ -475,13 +475,13 @@ static int decode_dynamic_huffman_tables(BitStream* bit_stream, HFTable* literal
 	}
 
     if ((err = generate_codes(literals_hf)) < 0) {
-		SAFE_FREE(distance_hf -> lengths);
+		QCOW_SAFE_FREE(distance_hf -> lengths);
 		deallocate_hf_table(literals_hf);
 		WARNING_LOG("An error occurred while generating the codes for the literals_hf table.\n");
 		return err;
 	}
 	
-	SAFE_FREE(literals_hf -> lengths);
+	QCOW_SAFE_FREE(literals_hf -> lengths);
 
 	if ((err = generate_codes(distance_hf)) < 0) {
 		DEALLOCATE_TABLES(literals_hf, distance_hf);
@@ -489,7 +489,7 @@ static int decode_dynamic_huffman_tables(BitStream* bit_stream, HFTable* literal
 		return err;
 	}
 
-	SAFE_FREE(distance_hf -> lengths);
+	QCOW_SAFE_FREE(distance_hf -> lengths);
 
     return ZLIB_NO_ERROR;
 }
@@ -565,7 +565,7 @@ unsigned char* zlib_inflate(unsigned char* stream, unsigned int size, unsigned i
     // Initialize decompressed data
     unsigned char* decompressed_data = (unsigned char*) calloc(1, sizeof(unsigned char));
     if (decompressed_data == NULL) {
-		SAFE_FREE(stream);
+		QCOW_SAFE_FREE(stream);
 		*zlib_err = -ZLIB_IO_ERROR;
 		return ((unsigned char*) "Failed to allocate buffer for decompressed_data.\n");
 	}
@@ -586,18 +586,18 @@ unsigned char* zlib_inflate(unsigned char* stream, unsigned int size, unsigned i
 		
         if (compression_method == NO_COMPRESSION) {
 			if ((*zlib_err = read_uncompressed_data(&bit_stream, &decompressed_data, decompressed_data_length)) < 0) {
-				MULTI_FREE(stream, decompressed_data);
+				QCOW_MULTI_FREE(stream, decompressed_data);
 				return ((unsigned char*) "corrupted compressed block\n");
             }
             continue;
         } else if (compression_method == RESERVED) {
-			MULTI_FREE(stream, decompressed_data);
+			QCOW_MULTI_FREE(stream, decompressed_data);
             return ((unsigned char*) "invalid compression type\n");
         } 
 		
         // Decode compressed data block
 		if ((*zlib_err = decode_compressed_block(compression_method, &bit_stream, &decompressed_data, decompressed_data_length)) < 0) {
-			MULTI_FREE(stream, decompressed_data);
+			QCOW_MULTI_FREE(stream, decompressed_data);
 			return ((unsigned char*) "An error occurred while decompressing the block.\n");
 		}
 
@@ -606,7 +606,7 @@ unsigned char* zlib_inflate(unsigned char* stream, unsigned int size, unsigned i
 	}
 		
 	*zlib_err = ZLIB_NO_ERROR;
-	SAFE_FREE(stream);
+	QCOW_SAFE_FREE(stream);
 
     return decompressed_data;
 }
