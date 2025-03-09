@@ -15,8 +15,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef _UTILS_H_
-#define _UTILS_H_
+#ifndef _QCOW_UTILS_H_
+#define _QCOW_UTILS_H_
 
 // -------------------------------
 // Printing Macros
@@ -172,5 +172,5 @@ UNUSED_FUNCTION static int str_n_cmp(const char* str1, const char* str2, size_t 
 	return 0;
 }
 
-#endif //_UTILS_H_
+#endif //_QCOW_UTILS_H_
 
