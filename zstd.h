@@ -323,7 +323,7 @@ static int read_probabilities(BitStream* compressed_bit_stream, unsigned char ta
 	if (table_log > FSE_TABLELOG_ABSOLUTE_MAX) return -ZSTD_TABLE_LOG_TOO_LARGE;
 	int remaining = (1 << table_log) + 1;
 
-	*frequencies = (short int*) realloc(*frequencies, (FSE_MAX_SYMBOL_VALUE + 1U) * sizeof(short int));
+	*frequencies = (short int*) qcow_realloc(*frequencies, (FSE_MAX_SYMBOL_VALUE + 1U) * sizeof(short int));
 	if (*frequencies == NULL) {
 		WARNING_LOG("Failed to allocate frequencies.\n");
 		return -ZSTD_IO_ERROR;
@@ -377,7 +377,7 @@ static int read_probabilities(BitStream* compressed_bit_stream, unsigned char ta
 		return -ZSTD_CORRUPTED_DATA;
 	}
 
-	*frequencies = (short int*) realloc(*frequencies, *probabilities_cnt * sizeof(short int));
+	*frequencies = (short int*) qcow_realloc(*frequencies, *probabilities_cnt * sizeof(short int));
 	if (*frequencies == NULL) {
 		WARNING_LOG("Failed to allocate frequencies.\n");
 		return -ZSTD_IO_ERROR;
@@ -393,7 +393,7 @@ static int fse_build_table(unsigned char table_log, short int* frequencies, unsi
 
 	// Build the decoding table from those probabilites
 	unsigned short int table_size = 1 << table_log; 
-	*fse_table = (FSETableEntry*) realloc(*fse_table, table_size * sizeof(FSETableEntry));
+	*fse_table = (FSETableEntry*) qcow_realloc(*fse_table, table_size * sizeof(FSETableEntry));
 	if (*fse_table == NULL) {
 		WARNING_LOG("Failed to allocate the fse table.\n");
 		return -ZSTD_IO_ERROR;
@@ -426,7 +426,7 @@ static int fse_build_table(unsigned char table_log, short int* frequencies, unsi
 		return -ZSTD_CORRUPTED_DATA;
 	}
 	
-	unsigned int* symbol_counter = (unsigned int*) calloc(probabilities_cnt, sizeof(unsigned int));
+	unsigned int* symbol_counter = (unsigned int*) qcow_calloc(probabilities_cnt, sizeof(unsigned int));
 	if (symbol_counter == NULL) {
 		QCOW_SAFE_FREE(*fse_table);
 		WARNING_LOG("Failed to allocate symbol counter buffer.\n");
@@ -496,10 +496,10 @@ static int read_weights(BitStream* compressed_bit_stream, unsigned char* table_l
 		unsigned short int odd_state = reversed_bitstream_read_bits(&weights_compressed_bit_stream, *table_log);
 		
 		while (TRUE) {
-			*weights = (unsigned char*) realloc(*weights, sizeof(unsigned char) * (*weights_cnt + 2));
+			*weights = (unsigned char*) qcow_realloc(*weights, sizeof(unsigned char) * (*weights_cnt + 2));
 			if (*weights == NULL) {
 				QCOW_SAFE_FREE(fse_table);
-				WARNING_LOG("Failed to reallocate the weights.\n");
+				WARNING_LOG("Failed to qcow_reallocate the weights.\n");
 				return -ZSTD_IO_ERROR;
 			}
 
@@ -531,10 +531,10 @@ static int read_weights(BitStream* compressed_bit_stream, unsigned char* table_l
 			}
 			
 			if (weights_compressed_bit_stream.bit_pos < 0) {
-				*weights = (unsigned char*) realloc(*weights, sizeof(unsigned char) * (++(*weights_cnt)));
+				*weights = (unsigned char*) qcow_realloc(*weights, sizeof(unsigned char) * (++(*weights_cnt)));
 				if (*weights == NULL) {
 					QCOW_SAFE_FREE(fse_table);
-					WARNING_LOG("Failed to reallocate the weights.\n");
+					WARNING_LOG("Failed to qcow_reallocate the weights.\n");
 					return -ZSTD_IO_ERROR;
 				}
 
@@ -556,9 +556,9 @@ static int read_weights(BitStream* compressed_bit_stream, unsigned char* table_l
 		}
 	} else {
 		*weights_cnt = header_byte - 127;
-		*weights = (unsigned char*) realloc(*weights, sizeof(unsigned char) * (*weights_cnt));
+		*weights = (unsigned char*) qcow_realloc(*weights, sizeof(unsigned char) * (*weights_cnt));
 		if (*weights == NULL) {
-			WARNING_LOG("Failed to reallocate the weights.\n");
+			WARNING_LOG("Failed to qcow_reallocate the weights.\n");
 			return -ZSTD_IO_ERROR;
 		}
 
@@ -599,9 +599,9 @@ static int build_huff_table(BitStream* compressed_bit_stream, Workspace* workspa
 	// NOTE for Adventurers: Don't be fooled by those monkeys at Meta that specify "Huffman Tree" in their RFC 8878 (sponsored as official reference of ZSTD), and instead use a state-based approach
 	// Furthermore, thanks to "zstd-rs" (at "https://github.com/KillingSpark/zstd-rs") for showing what they were actually doing inside their jungle mess of code.
 	workspace -> max_nb_bits = highest_bit(exp_weights_cnt);
-	weights = realloc(weights, sizeof(unsigned char) * (++weights_cnt));
+	weights = qcow_realloc(weights, sizeof(unsigned char) * (++weights_cnt));
 	if (weights == NULL) {
-		WARNING_LOG("Failed to reallocate the weights.\n");
+		WARNING_LOG("Failed to qcow_reallocate the weights.\n");
 		return -ZSTD_IO_ERROR;
 	}
 	
@@ -609,10 +609,10 @@ static int build_huff_table(BitStream* compressed_bit_stream, Workspace* workspa
 	
 	unsigned short int hf_literals_size = 1 << workspace -> max_nb_bits;
 	unsigned short int hf_literals_cnt = 0;
-	workspace -> hf_literals = (ZSTDHfEntry*) realloc(workspace -> hf_literals, hf_literals_size * sizeof(ZSTDHfEntry));
+	workspace -> hf_literals = (ZSTDHfEntry*) qcow_realloc(workspace -> hf_literals, hf_literals_size * sizeof(ZSTDHfEntry));
 	if (workspace -> hf_literals == NULL) {
 		QCOW_SAFE_FREE(weights);
-		WARNING_LOG("Failed to reallocate the huff table for literals.\n");
+		WARNING_LOG("Failed to qcow_reallocate the huff table for literals.\n");
 		return -ZSTD_IO_ERROR;
 	}
 	
@@ -730,7 +730,7 @@ static int parse_literals_section(BitStream* compressed_bit_stream, Workspace* w
 		
 		workspace -> literals_cnt = 0;
 		QCOW_SAFE_FREE(workspace -> literals);
-		workspace -> literals = (unsigned char*) calloc(lsh.regenerated_size, sizeof(unsigned char));
+		workspace -> literals = (unsigned char*) qcow_calloc(lsh.regenerated_size, sizeof(unsigned char));
 		if (workspace -> literals == NULL) {
 			WARNING_LOG("Failed to allocate literals buffer.\n");
 			return -ZSTD_IO_ERROR;
@@ -750,7 +750,7 @@ static int parse_literals_section(BitStream* compressed_bit_stream, Workspace* w
 		
 		QCOW_SAFE_FREE(workspace -> literals);
 		workspace -> literals_cnt = 0;
-		workspace -> literals = (unsigned char*) calloc(lsh.regenerated_size, sizeof(unsigned char));
+		workspace -> literals = (unsigned char*) qcow_calloc(lsh.regenerated_size, sizeof(unsigned char));
 		if (workspace -> literals == NULL) {
 			WARNING_LOG("Failed to allocate literals buffer.\n");
 			return -ZSTD_IO_ERROR;
@@ -933,7 +933,7 @@ static int parse_sequence_section(BitStream* compressed_bit_stream, Workspace* w
 	// Parse the FSE Table as defined in decode_sequences_with_rle in zstd-rs, the price of few branches is feasible as at the moment we value more readability.
 	// At each pass it will decode a Sequence, so we need a struct for the Sequences
 	QCOW_SAFE_FREE(workspace -> sequences);
-	workspace -> sequences = (Sequence*) calloc(workspace -> sequence_len, sizeof(Sequence));
+	workspace -> sequences = (Sequence*) qcow_calloc(workspace -> sequence_len, sizeof(Sequence));
 	if (workspace -> sequences == NULL) {
 		WARNING_LOG("Failed to allocate sequences buffer.\n");
 		return -ZSTD_IO_ERROR;
@@ -1066,9 +1066,9 @@ static int parse_block(BitStream* bit_stream, Workspace* workspace, unsigned int
 	
 	if (block_header.block_type == RAW_BLOCK) {
 		if (workspace -> frame_buffer_len + block_header.block_size) {
-			workspace -> frame_buffer = (unsigned char*) realloc(workspace -> frame_buffer, (workspace -> frame_buffer_len + block_header.block_size) * sizeof(unsigned char));
+			workspace -> frame_buffer = (unsigned char*) qcow_realloc(workspace -> frame_buffer, (workspace -> frame_buffer_len + block_header.block_size) * sizeof(unsigned char));
 			if (workspace -> frame_buffer == NULL) {
-				WARNING_LOG("Failed to reallocate frame buffer.\n");
+				WARNING_LOG("Failed to qcow_reallocate frame buffer.\n");
 				return -ZSTD_IO_ERROR;
 			}
 
@@ -1077,9 +1077,9 @@ static int parse_block(BitStream* bit_stream, Workspace* workspace, unsigned int
 			workspace -> frame_buffer_len += block_header.block_size;
 		}
 	} else if (block_header.block_type == RLE_BLOCK) {
-		workspace -> frame_buffer = (unsigned char*) realloc(workspace -> frame_buffer, (workspace -> frame_buffer_len + block_header.block_size) * sizeof(unsigned char));
+		workspace -> frame_buffer = (unsigned char*) qcow_realloc(workspace -> frame_buffer, (workspace -> frame_buffer_len + block_header.block_size) * sizeof(unsigned char));
 		if (workspace -> frame_buffer == NULL) {
-			WARNING_LOG("Failed to reallocate frame buffer.\n");
+			WARNING_LOG("Failed to qcow_reallocate frame buffer.\n");
 			return -ZSTD_IO_ERROR;
 		}
 		
@@ -1087,9 +1087,9 @@ static int parse_block(BitStream* bit_stream, Workspace* workspace, unsigned int
 		mem_set(workspace -> frame_buffer + workspace -> frame_buffer_len, rle_val, block_header.block_size * sizeof(unsigned char));
 		workspace -> frame_buffer_len += block_header.block_size;
 	} else {
-		workspace -> frame_buffer = (unsigned char*) realloc(workspace -> frame_buffer, (workspace -> frame_buffer_len + block_maximum_size) * sizeof(unsigned char));
+		workspace -> frame_buffer = (unsigned char*) qcow_realloc(workspace -> frame_buffer, (workspace -> frame_buffer_len + block_maximum_size) * sizeof(unsigned char));
 		if (workspace -> frame_buffer == NULL) {
-			WARNING_LOG("Failed to reallocate frame buffer.\n");
+			WARNING_LOG("Failed to qcow_reallocate frame buffer.\n");
 			return -ZSTD_IO_ERROR;
 		}
 		
@@ -1102,9 +1102,9 @@ static int parse_block(BitStream* bit_stream, Workspace* workspace, unsigned int
 			return err;
 		}
 
-		workspace -> frame_buffer = (unsigned char*) realloc(workspace -> frame_buffer, workspace -> frame_buffer_len * sizeof(unsigned char));
+		workspace -> frame_buffer = (unsigned char*) qcow_realloc(workspace -> frame_buffer, workspace -> frame_buffer_len * sizeof(unsigned char));
 		if (workspace -> frame_buffer == NULL && workspace -> frame_buffer_len != 0) {
-			WARNING_LOG("Failed to reallocate frame buffer.\n");
+			WARNING_LOG("Failed to qcow_reallocate frame buffer.\n");
 			return -ZSTD_IO_ERROR;
 		}
 	}
@@ -1199,10 +1199,10 @@ static int parse_frames(BitStream* bit_stream, unsigned char** decompressed_data
 	}
 	
 	if (workspace.frame_buffer_len) {
-		*decompressed_data = (unsigned char*) realloc(*decompressed_data, (*decompressed_data_length + workspace.frame_buffer_len) * sizeof(unsigned char));
+		*decompressed_data = (unsigned char*) qcow_realloc(*decompressed_data, (*decompressed_data_length + workspace.frame_buffer_len) * sizeof(unsigned char));
 		if (*decompressed_data == NULL) {
 			deallocate_workspace(&workspace);
-			WARNING_LOG("Failed to reallocate the decompressed data buffer.\n");
+			WARNING_LOG("Failed to qcow_reallocate the decompressed data buffer.\n");
 			return -ZSTD_IO_ERROR;
 		}
 
@@ -1220,7 +1220,7 @@ static int parse_frames(BitStream* bit_stream, unsigned char** decompressed_data
 // TODO: Rewrite the warnings msgs to have a compact style
 // TODO: Note that as most of CPUs use little-endian, and that the ZSTD format follows that, it could be unjustified the use of LE_CONVERT to convert to LE from BE, in rare cases.
 unsigned char* zstd_inflate(unsigned char* stream, unsigned int size, unsigned int* decompressed_data_length, int* zstd_err) {
-	unsigned char* decompressed_data = (unsigned char*) calloc(1, sizeof(unsigned char));
+	unsigned char* decompressed_data = (unsigned char*) qcow_calloc(1, sizeof(unsigned char));
 	if (decompressed_data == NULL) {
 		QCOW_SAFE_FREE(stream);
 		WARNING_LOG("Failed to allocate decompressed data buffer.\n");

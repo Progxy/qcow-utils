@@ -59,14 +59,25 @@
 #define QCOW_ARR_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #define QCOW_CAST_PTR(ptr, type) ((type*) (ptr))
 
+#ifndef _QCOW_CUSTOM_ALLOCATORS_
+	#define qcow_calloc  calloc
+	#define qcow_realloc realloc
+	#define qcow_free    free
+#else
+	#if !defined(qcow_calloc) || !defined(qcow_realloc) || !defined(qcow_free)
+		#error "If using custom allocators all qcow_calloc, qcow_realloc and qcow_free must be defined."
+		#include <stophere>
+	#endif // check definitions
+#endif //_QCOW_CUSTOM_ALLOCATORS_
+
 #ifndef MIN
 	#define MIN(a, b) (a < b ? a : b)
 	#define MAX(a, b) (a > b ? a : b)
 #endif //MIN
 
 #ifndef UNUSED_FUNCTION
-	#define UNUSED_FUNCTION __attribute__((unused))
-	#define PACKED_STRUCT __attribute__((packed))
+	#define UNUSED_FUNCTION  __attribute__((unused))
+	#define PACKED_STRUCT    __attribute__((packed))
 	#define UNUSED_VAR(var) (void) var
 #endif //UNUSED_FUNCTION
 
@@ -100,7 +111,7 @@
     #define qcow_be_to_le(ptr_val, size)
 #endif // CHECK_ENDIANNESS
 
-#define QCOW_SAFE_FREE(ptr) do { if ((ptr) != NULL) free(ptr), (ptr) = NULL; } while(0)
+#define QCOW_SAFE_FREE(ptr) do { if ((ptr) != NULL) qcow_free(ptr), (ptr) = NULL; } while(0)
 #define QCOW_MULTI_FREE(...) 															\
 	do {																				\
 		void* ptrs[] = { NULL, ##__VA_ARGS__ };							 				\
@@ -138,7 +149,7 @@ static void* mem_cpy(void* dest, const void* src, size_t size) {
 static void mem_move(void* dest, const void* src, size_t size) {
     if (dest == NULL || src == NULL || size == 0) return;
     
-	unsigned char* temp = (unsigned char*) calloc(size, sizeof(unsigned char));
+	unsigned char* temp = (unsigned char*) qcow_calloc(size, sizeof(unsigned char));
 	
 	for (size_t i = 0; i < size; ++i) *QCOW_CAST_PTR(temp + i, unsigned char) = *QCOW_CAST_PTR(QCOW_CAST_PTR(src, unsigned char) + i, unsigned char); 
     for (size_t i = 0; i < size; ++i) *QCOW_CAST_PTR(QCOW_CAST_PTR(dest, unsigned char) + i, unsigned char) = *QCOW_CAST_PTR(temp + i, unsigned char);

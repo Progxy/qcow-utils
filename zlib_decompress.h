@@ -153,14 +153,14 @@ static int generate_codes(HFTable* hf) {
 	for (unsigned short int i = 0; i < hf -> size; ++i) bl_count[(hf -> lengths)[i]]++;
     
 	bl_count[0] = 0;
-    hf -> values = (unsigned short int**) calloc(hf -> max_bit_length + 1, sizeof(unsigned short int*));
+    hf -> values = (unsigned short int**) qcow_calloc(hf -> max_bit_length + 1, sizeof(unsigned short int*));
     if (hf -> values == NULL) {
 		WARNING_LOG("Failed to allocate buffer for hf -> values.\n");
 		return -ZLIB_IO_ERROR;
 	}
 	
 	for (unsigned char i = 1; i <= hf -> max_bit_length; ++i) {
-        (hf -> values)[i] = (unsigned short int*) calloc(bl_count[i], sizeof(unsigned short int));
+        (hf -> values)[i] = (unsigned short int*) qcow_calloc(bl_count[i], sizeof(unsigned short int));
 		if ((hf -> values)[i] == NULL) {
 			WARNING_LOG("Failed to allocate buffer for hf -> values[%u].\n", i);
 			return -ZLIB_IO_ERROR;
@@ -168,13 +168,13 @@ static int generate_codes(HFTable* hf) {
 	}
 
 	// Find the minimum and maximum code values for each bit_length 
-    hf -> min_codes = (unsigned short int*) calloc(hf -> max_bit_length + 1, sizeof(unsigned short int));
+    hf -> min_codes = (unsigned short int*) qcow_calloc(hf -> max_bit_length + 1, sizeof(unsigned short int));
     if (hf -> min_codes == NULL) {
 		WARNING_LOG("Failed to allocate buffer for hf -> min_codes.\n");
 		return -ZLIB_IO_ERROR;
 	}
 	
-	hf -> max_codes = (unsigned short int*) calloc(hf -> max_bit_length + 1, sizeof(unsigned short int));
+	hf -> max_codes = (unsigned short int*) qcow_calloc(hf -> max_bit_length + 1, sizeof(unsigned short int));
     if (hf -> max_codes == NULL) {
 		WARNING_LOG("Failed to allocate buffer for hf -> max_codes.\n");
 		return -ZLIB_IO_ERROR;
@@ -187,7 +187,7 @@ static int generate_codes(HFTable* hf) {
 	
 	// Compute the code for each entry, and updating the max_code each time accordingly.
     // In this way we sort of allocate a code for each entry in order (as lexicographical order is required), as we already know the base for each bit_length (min_code).
-	unsigned char* values_index = (unsigned char*) calloc(hf -> max_bit_length + 1, sizeof(unsigned char));
+	unsigned char* values_index = (unsigned char*) qcow_calloc(hf -> max_bit_length + 1, sizeof(unsigned char));
     if (values_index == NULL) {
 		WARNING_LOG("Failed to allocate buffer for values_index.\n");
 		return -ZLIB_IO_ERROR;
@@ -237,13 +237,13 @@ static int decode_hf(BitStream* bit_stream, unsigned short int code, HFTable hf)
 }
 
 static int decode_lengths(BitStream* bit_stream, HFTable decoder_hf, HFTable* literals_hf, HFTable* distance_hf) {
-    literals_hf -> lengths = (unsigned char*) calloc(literals_hf -> size, sizeof(unsigned char));
+    literals_hf -> lengths = (unsigned char*) qcow_calloc(literals_hf -> size, sizeof(unsigned char));
 	if (literals_hf -> lengths == NULL) {
 		WARNING_LOG("Failed to allocate buffer for literals_hf -> lengths.\n");
 		return -ZLIB_IO_ERROR;
 	}
 	
-	distance_hf -> lengths = (unsigned char*) calloc(distance_hf -> size, sizeof(unsigned char));
+	distance_hf -> lengths = (unsigned char*) qcow_calloc(distance_hf -> size, sizeof(unsigned char));
     if (distance_hf -> lengths == NULL) {
 		QCOW_SAFE_FREE(literals_hf -> lengths);
 		WARNING_LOG("Failed to allocate buffer for distance_hf -> lengths.\n");
@@ -311,9 +311,9 @@ static int decode_lengths(BitStream* bit_stream, HFTable decoder_hf, HFTable* li
 
 /// Move backwards distance bytes in the output stream, and copy length bytes from this position to the output stream
 static int copy_data(unsigned char** dest, unsigned int* index, unsigned short int length, unsigned short int distance) {
-    *dest = (unsigned char*) realloc(*dest, sizeof(unsigned char) * ((*index) + length));
+    *dest = (unsigned char*) qcow_realloc(*dest, sizeof(unsigned char) * ((*index) + length));
 	if (*dest == NULL) {
-		WARNING_LOG("Failed to reallocate buffer for dest.\n");
+		WARNING_LOG("Failed to qcow_reallocate buffer for dest.\n");
 		return -ZLIB_IO_ERROR;
 	}
 
@@ -369,9 +369,9 @@ static int read_uncompressed_data(BitStream* bit_stream, unsigned char** decompr
 	}
 
 	// Read length bytes from the stream
-    *decompressed_data = (unsigned char*) realloc(*decompressed_data, sizeof(unsigned char) * (*decompressed_data_length + length));
+    *decompressed_data = (unsigned char*) qcow_realloc(*decompressed_data, sizeof(unsigned char) * (*decompressed_data_length + length));
 	if (mem_cpy(*decompressed_data + *decompressed_data_length, bitstream_read_bytes(bit_stream, sizeof(unsigned char), length), sizeof(unsigned char) * length) == NULL) {
-		WARNING_LOG("Failed to reallocate buffer for decompressed data.\n");
+		WARNING_LOG("Failed to qcow_reallocate buffer for decompressed data.\n");
 		return -ZLIB_IO_ERROR;
 	}
 
@@ -419,7 +419,7 @@ static int decode_dynamic_huffman_tables(BitStream* bit_stream, HFTable* literal
 
     // Retrieve the length to build the huffman tree to decode the other two huffman trees (Literals and Distance)
     const unsigned char order_of_code_lengths[] = {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
-    decoder_hf.lengths = (unsigned char*) calloc(HF_TABLE_SIZE, sizeof(unsigned char));
+    decoder_hf.lengths = (unsigned char*) qcow_calloc(HF_TABLE_SIZE, sizeof(unsigned char));
 	if (decoder_hf.lengths == NULL) {
 		WARNING_LOG("Failed to allocate buffer for decoder_hf lengths.\n");
 		return -ZLIB_IO_ERROR;
@@ -451,10 +451,10 @@ static int decode_dynamic_huffman_tables(BitStream* bit_stream, HFTable* literal
 
 	// Again this values are required to be set as they are used for the allocation
     if (literals_hf -> size < HF_LITERALS_SIZE) {
-		literals_hf -> lengths = realloc(literals_hf -> lengths, sizeof(unsigned char) * HF_LITERALS_SIZE);
+		literals_hf -> lengths = qcow_realloc(literals_hf -> lengths, sizeof(unsigned char) * HF_LITERALS_SIZE);
 		if (literals_hf -> lengths == NULL) {
 			QCOW_SAFE_FREE(distance_hf -> lengths);
-			WARNING_LOG("Failed to reallocate the buffer for literals_hf -> lenghts.\n");
+			WARNING_LOG("Failed to qcow_reallocate the buffer for literals_hf -> lenghts.\n");
 			return -ZLIB_IO_ERROR;
 		}
 
@@ -463,10 +463,10 @@ static int decode_dynamic_huffman_tables(BitStream* bit_stream, HFTable* literal
 	}
 	
 	if (distance_hf -> size < HF_DISTANCE_SIZE) {
-		distance_hf -> lengths = realloc(distance_hf -> lengths, sizeof(unsigned char) * HF_DISTANCE_SIZE);
+		distance_hf -> lengths = qcow_realloc(distance_hf -> lengths, sizeof(unsigned char) * HF_DISTANCE_SIZE);
 		if (distance_hf -> lengths == NULL) {
 			QCOW_SAFE_FREE(literals_hf -> lengths);
-			WARNING_LOG("Failed to reallocate the buffer for distance_hf -> lenghts.\n");
+			WARNING_LOG("Failed to qcow_reallocate the buffer for distance_hf -> lenghts.\n");
 			return -ZLIB_IO_ERROR;
 		}
 
@@ -523,10 +523,10 @@ static int decode_compressed_block(BType compression_method, BitStream* bit_stre
 		
 		if (decoded_value < 256) {
 			// If literal/length value < 256: copy value (literal/length byte) to output stream
-			*decompressed_data = (unsigned char*) realloc(*decompressed_data, sizeof(unsigned char) * (*decompressed_data_length + 1));
+			*decompressed_data = (unsigned char*) qcow_realloc(*decompressed_data, sizeof(unsigned char) * (*decompressed_data_length + 1));
 			if (*decompressed_data == NULL) {
 				DEALLOCATE_TABLES(&literals_hf, &distance_hf);
-				WARNING_LOG("Failed to reallocate buffer for decompressed data.\n");
+				WARNING_LOG("Failed to qcow_reallocate buffer for decompressed data.\n");
 				return -ZLIB_IO_ERROR;
 			}
 			
@@ -563,7 +563,7 @@ static int decode_compressed_block(BType compression_method, BitStream* bit_stre
 
 unsigned char* zlib_inflate(unsigned char* stream, unsigned int size, unsigned int* decompressed_data_length, int* zlib_err) {
     // Initialize decompressed data
-    unsigned char* decompressed_data = (unsigned char*) calloc(1, sizeof(unsigned char));
+    unsigned char* decompressed_data = (unsigned char*) qcow_calloc(1, sizeof(unsigned char));
     if (decompressed_data == NULL) {
 		QCOW_SAFE_FREE(stream);
 		*zlib_err = -ZLIB_IO_ERROR;

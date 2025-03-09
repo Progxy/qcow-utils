@@ -46,10 +46,10 @@ int main(int argc, char* argv[]) {
 	DEBUG_LOG("File size: %lu\n", file_size);
 	
 	size_t file_err = 0;
-	unsigned char* test_data = (unsigned char*) calloc(file_size, sizeof(unsigned char));
+	unsigned char* test_data = (unsigned char*) qcow_calloc(file_size, sizeof(unsigned char));
 	if (((long)(file_err = fread(test_data, sizeof(unsigned char), file_size, test_file)) != file_size)) {
 		PERROR_LOG("Failed to read from the test file");
-		free(test_data);
+		qcow_free(test_data);
 		fclose(test_file);
 		return -1;
 	} 	
@@ -75,7 +75,7 @@ int main(int argc, char* argv[]) {
 		file_err = 0;
 		if (((long)(file_err = fwrite(zstd_decompressed_data, sizeof(unsigned char), zstd_decompressed_data_length, out_file)) != zstd_decompressed_data_length)) {
 			PERROR_LOG("Failed to write from the out file");
-			free(zstd_decompressed_data);
+			qcow_free(zstd_decompressed_data);
 			fclose(out_file);
 			return -1;
 		}
@@ -83,7 +83,7 @@ int main(int argc, char* argv[]) {
 		fclose(out_file);
 	}
 	
-	free(zstd_decompressed_data);
+	qcow_free(zstd_decompressed_data);
 	
 	return 0;
 }

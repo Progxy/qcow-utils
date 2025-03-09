@@ -121,9 +121,9 @@ static void deallocate_hf_tree(HFTree* hf_tree) {
 
 static int length_distance_encoding(const unsigned char* data_stream, unsigned int data_stream_size, Match** distance_encoding, unsigned int* distance_encoding_cnt) {
 	*distance_encoding_cnt = MIN(data_stream_size, 3);
-	*distance_encoding = (Match*) realloc(*distance_encoding, *distance_encoding_cnt * sizeof(Match));
+	*distance_encoding = (Match*) qcow_realloc(*distance_encoding, *distance_encoding_cnt * sizeof(Match));
 	if (*distance_encoding == NULL) {
-		WARNING_LOG("Failed to reallocate buffer for distance_encoding.\n");
+		WARNING_LOG("Failed to qcow_reallocate buffer for distance_encoding.\n");
 		return -ZLIB_IO_ERROR;
 	}
 
@@ -145,9 +145,9 @@ static int length_distance_encoding(const unsigned char* data_stream, unsigned i
 
 		cur_len--;
 		
-		*distance_encoding = (Match*) realloc(*distance_encoding, sizeof(Match) * (++(*distance_encoding_cnt)));
+		*distance_encoding = (Match*) qcow_realloc(*distance_encoding, sizeof(Match) * (++(*distance_encoding_cnt)));
 		if (*distance_encoding == NULL) {
-			WARNING_LOG("Failed to reallocate buffer for distance_encoding.\n");
+			WARNING_LOG("Failed to qcow_reallocate buffer for distance_encoding.\n");
 			return -ZLIB_IO_ERROR;
 		}
 		
@@ -186,9 +186,9 @@ static int length_distance_encoding(const unsigned char* data_stream, unsigned i
 	}
 	
 	// Append the block delimiter
-	*distance_encoding = (Match*) realloc(*distance_encoding, sizeof(Match) * (++(*distance_encoding_cnt)));
+	*distance_encoding = (Match*) qcow_realloc(*distance_encoding, sizeof(Match) * (++(*distance_encoding_cnt)));
 	if (*distance_encoding == NULL) {
-		WARNING_LOG("Failed to reallocate buffer for distance_encoding.\n");
+		WARNING_LOG("Failed to qcow_reallocate buffer for distance_encoding.\n");
 		return -ZLIB_IO_ERROR;
 	}
 	
@@ -212,7 +212,7 @@ static void update_hf_nodes(HFNode new_node, HFNode* hf_nodes, unsigned int hf_n
 }
 
 static int build_hf_table(HFTree* hf_tree) {
-	hf_tree -> table = (unsigned short int*) calloc(hf_tree -> size, sizeof(unsigned short int));
+	hf_tree -> table = (unsigned short int*) qcow_calloc(hf_tree -> size, sizeof(unsigned short int));
 	if (hf_tree -> table == NULL) {
 		WARNING_LOG("Failed to allocate buffer for hf_tree.\n");
 		return -ZLIB_IO_ERROR;
@@ -245,14 +245,14 @@ static int generate_hf_tree(unsigned short int* data_stream, unsigned int data_s
 	}
 	
 	if (hf_tree -> size == 0) {
-		hf_tree -> table = (unsigned short int*) calloc(MAX(hf_tree -> size, 1), sizeof(unsigned short int));
-		hf_tree -> lengths = (unsigned char*) calloc(MAX(hf_tree -> size, 1), sizeof(unsigned char));
+		hf_tree -> table = (unsigned short int*) qcow_calloc(MAX(hf_tree -> size, 1), sizeof(unsigned short int));
+		hf_tree -> lengths = (unsigned char*) qcow_calloc(MAX(hf_tree -> size, 1), sizeof(unsigned char));
 		return ZLIB_NO_ERROR;
 	}
 
     // Build Huffman tree (iterative method)
 	unsigned int parent_size = hf_tree -> size;
-	unsigned int* parent = (unsigned int*) calloc(parent_size, sizeof(unsigned int));
+	unsigned int* parent = (unsigned int*) qcow_calloc(parent_size, sizeof(unsigned int));
 	if (parent == NULL) {
 		WARNING_LOG("Failed to allocate buffer for parent.\n");
 		return -ZLIB_IO_ERROR;
@@ -269,9 +269,9 @@ static int generate_hf_tree(unsigned short int* data_stream, unsigned int data_s
 
         // Create a new merged node
         HFNode new_node = (HFNode) { .symbol = parent_size++, .freq = left.freq + right.freq};
-		parent = (unsigned int*) realloc(parent, sizeof(unsigned int) * parent_size);
+		parent = (unsigned int*) qcow_realloc(parent, sizeof(unsigned int) * parent_size);
 		if (parent == NULL) {
-			WARNING_LOG("Failed to reallocate buffer for parent.\n");
+			WARNING_LOG("Failed to qcow_reallocate buffer for parent.\n");
 			return -ZLIB_IO_ERROR;
 		}
 
@@ -285,7 +285,7 @@ static int generate_hf_tree(unsigned short int* data_stream, unsigned int data_s
     }
 
     // Assign bit-lengths from depths
-    hf_tree -> lengths = (unsigned char*) calloc(hf_tree -> size, sizeof(unsigned char));
+    hf_tree -> lengths = (unsigned char*) qcow_calloc(hf_tree -> size, sizeof(unsigned char));
 	if (hf_tree -> lengths == NULL) {
 		WARNING_LOG("Failed to allocate buffer for hf_lengths.\n");
 		return -ZLIB_IO_ERROR;
@@ -312,7 +312,7 @@ static int generate_hf_tree(unsigned short int* data_stream, unsigned int data_s
 }
 
 static int rle_encoding(RLEStream** rle_encoded, unsigned short int* rle_encoded_size, HFTree hf_literals, HFTree hf_distances) {
-	*rle_encoded = (RLEStream*) calloc(hf_literals.size + hf_distances.size, sizeof(RLEStream));
+	*rle_encoded = (RLEStream*) qcow_calloc(hf_literals.size + hf_distances.size, sizeof(RLEStream));
 	if (*rle_encoded == NULL) {
 		WARNING_LOG("Failed to allocate buffer for rle_encoded.\n");
 		return -ZLIB_IO_ERROR;
@@ -381,9 +381,9 @@ static int rle_encoding(RLEStream** rle_encoded, unsigned short int* rle_encoded
 		for (unsigned char i = 0; i < limit; ++i, ++(*rle_encoded_size)) (*rle_encoded)[*rle_encoded_size].repeat_cnt = 0, (*rle_encoded)[*rle_encoded_size].value = previous_code;
 	}
 
-	*rle_encoded = (RLEStream*) realloc(*rle_encoded, (*rle_encoded_size) * sizeof(RLEStream));
+	*rle_encoded = (RLEStream*) qcow_realloc(*rle_encoded, (*rle_encoded_size) * sizeof(RLEStream));
 	if (*rle_encoded == NULL) {
-		WARNING_LOG("Failed to reallocate buffer for rle_encoded.\n");
+		WARNING_LOG("Failed to qcow_reallocate buffer for rle_encoded.\n");
 		return -ZLIB_IO_ERROR;
 	}
 
@@ -392,13 +392,13 @@ static int rle_encoding(RLEStream** rle_encoded, unsigned short int* rle_encoded
 
 static int generate_hf_trees(Match* distance_encoded, unsigned int distance_encoded_size, BitStream* buffer, HFTree* hf_literals, HFTree* hf_distances) {
 	unsigned int distance_size = 0;
-	unsigned short int* literals_data = (unsigned short int*) calloc(distance_encoded_size, sizeof(unsigned short int));
+	unsigned short int* literals_data = (unsigned short int*) qcow_calloc(distance_encoded_size, sizeof(unsigned short int));
 	if (literals_data == NULL) {
 		WARNING_LOG("Failed to allocate buffer for literals_data.\n");
 		return -ZLIB_IO_ERROR;
 	}
 
-	unsigned short int* distance_data = (unsigned short int*) calloc(distance_encoded_size, sizeof(unsigned short int));
+	unsigned short int* distance_data = (unsigned short int*) qcow_calloc(distance_encoded_size, sizeof(unsigned short int));
 	if (distance_data == NULL) {
 		QCOW_SAFE_FREE(literals_data);
 		WARNING_LOG("Failed to allocate buffer for distance_data.\n");
@@ -412,10 +412,10 @@ static int generate_hf_trees(Match* distance_encoded, unsigned int distance_enco
 
 	if (distance_size == 0) QCOW_SAFE_FREE(distance_data);
 	else {
-		distance_data = (unsigned short int*) realloc(distance_data, distance_size * sizeof(unsigned short int));
+		distance_data = (unsigned short int*) qcow_realloc(distance_data, distance_size * sizeof(unsigned short int));
 		if (distance_data == NULL) {
 			QCOW_SAFE_FREE(literals_data);
-			WARNING_LOG("Failed to reallocate buffer for distance_data.\n");
+			WARNING_LOG("Failed to qcow_reallocate buffer for distance_data.\n");
 			return -ZLIB_IO_ERROR;
 		}
 	}
@@ -445,7 +445,7 @@ static int generate_hf_trees(Match* distance_encoded, unsigned int distance_enco
 		return err;
 	}
 
-	unsigned short int* rle_encoded_data = (unsigned short int*) calloc(rle_encoded_size, sizeof(unsigned short int));
+	unsigned short int* rle_encoded_data = (unsigned short int*) qcow_calloc(rle_encoded_size, sizeof(unsigned short int));
 	if (rle_encoded_data == NULL) {
 		DEALLOCATE_TREES(hf_literals, hf_distances);
 		QCOW_SAFE_FREE(rle_encoded);

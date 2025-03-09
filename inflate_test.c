@@ -31,7 +31,7 @@ unsigned char zstd_compressed_data[] = {0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x44, 0xE5
 void test_zstd(void) {
 	int err = 0;
 	unsigned int zstd_decompressed_data_length = 0;
-	unsigned char* zstd_deflate_test = (unsigned char*) calloc(sizeof(zstd_compressed_data), sizeof(unsigned char));
+	unsigned char* zstd_deflate_test = (unsigned char*) qcow_calloc(sizeof(zstd_compressed_data), sizeof(unsigned char));
 	mem_cpy(zstd_deflate_test, zstd_compressed_data, sizeof(zstd_compressed_data));
 	unsigned char* zstd_decompressed_data = zstd_inflate((unsigned char*) zstd_deflate_test, sizeof(zstd_compressed_data), &zstd_decompressed_data_length, &err);
 	if (err) {
@@ -40,14 +40,14 @@ void test_zstd(void) {
 	} 
 	
 	printf("ZSTD decompressed data: '%.*s'\n", zstd_decompressed_data_length, zstd_decompressed_data);
-	free(zstd_decompressed_data);
+	qcow_free(zstd_decompressed_data);
 	return;
 }
 
 void test_zlib(void) {
 	int err = 0;
 	unsigned int zlib_decompressed_data_length = 0;
-	unsigned char* zlib_deflate_test = (unsigned char*) calloc(sizeof(zlib_compressed_data), sizeof(unsigned char));
+	unsigned char* zlib_deflate_test = (unsigned char*) qcow_calloc(sizeof(zlib_compressed_data), sizeof(unsigned char));
 	mem_cpy(zlib_deflate_test, zlib_compressed_data, sizeof(zlib_compressed_data));
 	unsigned char* zlib_decompressed_data = zlib_inflate((unsigned char*) zlib_deflate_test, sizeof(zlib_compressed_data), &zlib_decompressed_data_length, &err);
 	if (err) {
@@ -56,7 +56,7 @@ void test_zlib(void) {
 	}
 	
 	printf("Zlib decompressed data: '%.*s'\n", zlib_decompressed_data_length, zlib_decompressed_data);
-	free(zlib_decompressed_data);
+	qcow_free(zlib_decompressed_data);
 	return;
 }
 
