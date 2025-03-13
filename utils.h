@@ -122,9 +122,9 @@
 // ------------------------
 //  Functions Declarations
 // ------------------------
-#define mem_set(ptr, value, size) mem_set_var(ptr, value, size, sizeof(unsigned char))
-#define mem_set_32(ptr, value, size) mem_set_var(ptr, value, size * sizeof(unsigned int), sizeof(unsigned int))
-#define mem_set_64(ptr, value, size) mem_set_var(ptr, value, size * sizeof(unsigned long long int), sizeof(unsigned long long int))
+#define mem_set(ptr, value, size)    mem_set_var(ptr, value, size, sizeof(unsigned char))
+#define mem_set_32(ptr, value, size) mem_set_var(ptr, value, size, sizeof(unsigned int))
+#define mem_set_64(ptr, value, size) mem_set_var(ptr, value, size, sizeof(unsigned long long int))
 static void mem_set_var(void* ptr, int value, size_t size, size_t val_size);
 static void* mem_cpy(void* dest, const void* src, size_t size);
 static void mem_move(void* dest, const void* src, size_t size);
