@@ -188,6 +188,7 @@ typedef struct PACKED_STRUCT SubclusterInfo {
 // 		 somehow expose them to the end user, and also once choosen to activate its l1_table, sort of initializing the entire qcow metadata structure.
 // TODO: Add support for bitmaps: requires extension header and the check of the autoclear field (bit 0).
 // TODO: Add support for crypt method: it requires checking for the crypt method used, and also the extension header for informations.
+// TODO: Possibly check the hints for a better implementation in the pdf file
 
 // TODO: After implementing most of the aforementioned support the code needs to be tidied up.
 // TODO: Rewrite the error messages for more clarity, and also add comments to better explain how everything works.
