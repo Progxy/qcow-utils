@@ -15,6 +15,25 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+// TODO: Add support for ZSTD compression.
+// TODO: Add support for snapshots: it requires the nb_snapshots and the offset of the table, 
+//       also requires a bit of rethinking of the entire system, as it needs to
+//       parse the entries in the snapshot table,
+// 		 somehow expose them to the end user, and also once choosen to activate
+// 		 its l1_table, sort of initializing the entire qcow metadata structure.
+// TODO: Add support for bitmaps: requires extension header and the check of
+//       the autoclear field (bit 0).
+// TODO: Add support for crypt method: it requires checking for the crypt method used, 
+//       and also the extension header for informations.
+// TODO: Possibly check the hints for a better implementation in the pdf file
+// TODO: Could introduce a global variable QCowContext, for holding context after parse_qcow 
+//       (which should then renamed to something like init_qcow or similar)
+
+// TODO: After implementing most of the aforementioned support the code needs to be tidied up.
+// TODO: Rewrite the error messages for more clarity, and also add comments to
+//       better explain how everything works.
+// TODO: Maybe split the following file in smaller and more digestible headers.
+
 #ifndef _QCOW_PARSER_H_
 #define _QCOW_PARSER_H_
 
@@ -38,12 +57,13 @@
 // ------------------
 //  Macros Functions
 // ------------------
-#define IS_COMPRESSED_CLUSTER(img_offset)((img_offset >> 62) & 1) 
-#define GET_IMAGE_OFFSET(offset) (offset & QCOW_MASK_BITS_INTERVAL(56, 9))
-#define FLOORING(dividend, divisor) (((dividend) - ((dividend) % (divisor))) / (divisor))
-#define CEILING(dividend, divisor) (((dividend) - ((dividend) % (divisor))) / (divisor) + (((dividend) % (divisor)) > 0)) 
+#define IS_COMPRESSED_CLUSTER(img_offset)                               ((img_offset >> 62) & 1)
+#define GET_IMAGE_OFFSET(offset)                                        (offset & QCOW_MASK_BITS_INTERVAL(56, 9))
+#define FLOORING(dividend, divisor)                                     (((dividend) - ((dividend) % (divisor))) / (divisor))
+#define CEILING(dividend, divisor)                                      (((dividend) - ((dividend) % (divisor))) / (divisor) + (((dividend) % (divisor)) > 0)) 
 #define IS_CLUSTER_ALIGNED(cluster_offset, img_file_base, cluster_size) ((((cluster_offset) - (img_file_base)) % (cluster_size)) == 0)
-#define IMG_OFFSET_INFO(img_offset) DEBUG_LOG("0x%lX: img_offset: 0x%llX, is_compressed_cluster: '%s'.\n", img_offset, img_offset & QCOW_MASK_BITS_INTERVAL(56, 9), QCOW_BOOL2STR(IS_COMPRESSED_CLUSTER(img_offset))) 
+#define IMG_OFFSET_INFO(img_offset)                                     DEBUG_LOG("0x%lX: img_offset: 0x%llX, is_compressed_cluster: '%s'.\n", \
+																		img_offset, img_offset & QCOW_MASK_BITS_INTERVAL(56, 9), QCOW_BOOL2STR(IS_COMPRESSED_CLUSTER(img_offset))) 
 
 /* -------------------------------------------------------------------------------------------------------- */
 // -------
@@ -104,12 +124,28 @@ typedef enum PACKED_STRUCT QCowExtType {
     EXTERNAL_FILE_NAME,
     UNKNOWN_EXTENSION 
 } QCowExtType;
-static const char* qcow_ext_types_strs[] = { "HEADER_EXT_END", "BACKING_FILE_NAME", "FEATURE_NAME_TABLE", "BITMAPS_EXTENSION", "ENCRYPTION_HEADER", "EXTERNAL_FILE_NAME", "UNKNOWN_EXTENSION" };
+
+static const char* qcow_ext_types_strs[] = { 
+	"HEADER_EXT_END", 
+	"BACKING_FILE_NAME", 
+	"FEATURE_NAME_TABLE", 
+	"BITMAPS_EXTENSION", 
+	"ENCRYPTION_HEADER", 
+	"EXTERNAL_FILE_NAME", 
+	"UNKNOWN_EXTENSION" 
+};
 
 /* deflate <https://www.ietf.org/rfc/rfc1951.txt> */
 /* zstd <http://github.com/facebook/zstd> */
-typedef enum PACKED_STRUCT CompressionType {DEFLATE = 0, ZSTD = 1} CompressionType;
-static const char* compression_type_str[] = { "DEFLATE", "ZSTD" };
+typedef enum PACKED_STRUCT CompressionType {
+	DEFLATE = 0, 
+	ZSTD = 1
+} CompressionType;
+
+static const char* compression_type_str[] = { 
+	"DEFLATE", 
+	"ZSTD" 
+};
 
 /* -------------------------------------------------------------------------------------------------------- */
 // ---------
@@ -182,16 +218,6 @@ typedef struct PACKED_STRUCT SubclusterInfo {
 // ------------------------
 //  Functions Declarations
 // ------------------------
-
-// TODO: Add support for ZSTD compression.
-// TODO: Add support for snapshots: it requires the nb_snapshots and the offset of the table, also requires a bit of rethinking of the entire system, as it needs to parse the entries in the snapshot table,
-// 		 somehow expose them to the end user, and also once choosen to activate its l1_table, sort of initializing the entire qcow metadata structure.
-// TODO: Add support for bitmaps: requires extension header and the check of the autoclear field (bit 0).
-// TODO: Add support for crypt method: it requires checking for the crypt method used, and also the extension header for informations.
-// TODO: Possibly check the hints for a better implementation in the pdf file
-
-// TODO: After implementing most of the aforementioned support the code needs to be tidied up.
-// TODO: Rewrite the error messages for more clarity, and also add comments to better explain how everything works.
 static inline QCowExtType to_qcow_ext_type(uint32_t val);
 static inline int write_at(FILE* file, uint64_t offset, const void* data, size_t size, size_t nmemb);
 static inline int read_at(FILE* file, uint64_t offset, void* data, size_t size, size_t nmemb);
