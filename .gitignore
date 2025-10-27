@@ -1,6 +1,3 @@
 *.qcow*
 qcow_test
-deflate_test
-inflate_test
-zstd_tester
 *.pdf
