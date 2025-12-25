@@ -1,3 +1,2 @@
 *.qcow*
-qcow_test
-*.pdf
+*/qcow_test

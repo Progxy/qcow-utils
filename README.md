@@ -14,11 +14,11 @@ Mostly because there isn't a real standard, and furthermore this implementation 
 Just clone the repo (maybe using `--depth=1` for a shallow copy), and then simply include the `qcow_parser.h` header in your application.
 NOTE: at the moment we do not offer a make target to compile it into a dynamic/static library, but there will probably be.
 
-Once included just call the exposed functions: `qread` and `qwrite` to perform reading and writing operations.
+Once included just call the exposed functions: `qread` and `qwrite` to perform reading and writing operations, on arbitrary LBAs (Logical Block Addresses).
 
 ### Note
 
-The utility has been tested with the [Arch Linux](https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-basic.qcow2) base qcow
+The utility has been tested with the [Arch Linux](https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-basic.qcow2) base qcow.
 
 ## References
 
