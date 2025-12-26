@@ -3,6 +3,6 @@
 #include "qcow_part.h"
 
 int main(void) {
-	printf("Hello World!");
+	get_first_sector("../Arch-Linux-x86_64-basic.qcow2");
 	return 0;
 }

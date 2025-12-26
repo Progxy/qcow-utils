@@ -18,10 +18,25 @@
 #ifndef _QCOW_UTILS_H_
 #define _QCOW_UTILS_H_
 
-#ifdef _QCOW_PRINTING_UTILS_
+#ifdef _QCOW_SPECIAL_TYPE_SUPPORT_
+
+typedef unsigned char      u8;
+typedef unsigned short int u16;
+typedef unsigned int       u32;
+typedef unsigned long long u64;
+
+#define STATIC_ASSERT          _Static_assert
+STATIC_ASSERT(sizeof(u8)   == 1,  "u8  must be 1 bytes");
+STATIC_ASSERT(sizeof(u16)  == 2,  "u16 must be 2 bytes");
+STATIC_ASSERT(sizeof(u32)  == 4,  "u32 must be 4 bytes");
+STATIC_ASSERT(sizeof(u64)  == 8,  "u64 must be 8 bytes");
+
+#endif //_QCOW_SPECIAL_TYPE_SUPPORT_
+
 // -------------------------------
 // Printing Macros
 // -------------------------------
+#ifdef _QCOW_PRINTING_UTILS_
 #define RED           "\033[31m"
 #define GREEN         "\033[32m"
 #define PURPLE        "\033[35m"
