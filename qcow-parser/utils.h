@@ -20,6 +20,8 @@
 
 #ifdef _QCOW_SPECIAL_TYPE_SUPPORT_
 
+typedef unsigned char bool;
+
 typedef unsigned char      u8;
 typedef unsigned short int u16;
 typedef unsigned int       u32;
@@ -51,7 +53,7 @@ STATIC_ASSERT(sizeof(u64)  == 8,  "u64 must be 8 bytes");
 
 #define COLOR_STR(str, COLOR) COLOR str RESET_COLOR
 #define WARNING_LOG(format, ...) printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", BRIGHT_YELLOW) format, __LINE__, ##__VA_ARGS__)
-#define TODO(msg) printf(COLOR_STR("TODO: " __FILE__ ":%u: ", TODO_COLOR) msg "\n", __LINE__), assert(FALSE)
+#define TODO(msg) printf(COLOR_STR("TODO: " __FILE__ ":%u: ", TODO_COLOR) msg "\n", __LINE__)
 
 #ifdef _DEBUG
 	#define DEBUG_LOG(format, ...) printf(COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format, __LINE__, ##__VA_ARGS__)
@@ -73,6 +75,7 @@ STATIC_ASSERT(sizeof(u64)  == 8,  "u64 must be 8 bytes");
 #define QCOW_MASK_BITS_PRECEDING(bit_index) ((1ULL << (bit_index)) - 1)
 #define QCOW_ARR_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #define QCOW_CAST_PTR(ptr, type) ((type*) (ptr))
+#define QCOW_TO_BOOL(val) (!!(val))
 
 #ifndef _QCOW_CUSTOM_ALLOCATORS_
 	#define qcow_calloc  calloc
@@ -84,6 +87,24 @@ STATIC_ASSERT(sizeof(u64)  == 8,  "u64 must be 8 bytes");
 		#include <stophere>
 	#endif // check definitions
 #endif //_QCOW_CUSTOM_ALLOCATORS_
+
+#define QCOW_SAFE_CALLOC(var, nmemb, size, fail_ret_val)                                              \
+do {                                                                                                  \
+	var = qcow_calloc((nmemb), (size));                                                               \
+	if (var == NULL) {                                                                                \
+		WARNING_LOG("Failed to perform calloc on " #var " with size %llu\n", (u64) (nmemb) * (size)); \
+		return fail_ret_val;                                                                          \
+	}                                                                                                 \
+} while(0)
+
+#define QCOW_SAFE_REALLOC(var, size, fail_ret_val) 						                     \
+do {                      															         \
+	(var) = qcow_realloc((var), (size));                                                     \
+	if ((var) == NULL) {                                                                     \
+		WARNING_LOG("Failed to perform realloc on " #var " with size %llu\n", (u64) (size)); \
+		return fail_ret_val;                                                                 \
+	}                                                                                        \
+} while(0)
 
 #ifndef MIN
 	#define MIN(a, b) (a < b ? a : b)

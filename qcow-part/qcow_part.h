@@ -23,61 +23,108 @@
 #define _QCOW_SPECIAL_TYPE_SUPPORT_
 #include "../qcow-parser/qcow_parser.h"
 
-typedef enum PartitionType { MBR = 0, GPT = 1, UNK = 2 } PartitionType;
-static const char* partition_type_str[] = { "MBR", "GPT", "UNKNOWN" };
+typedef enum PartitionScheme { MBR = 0, GPT = 1, UNK = 2 } PartitionScheme;
 
-static PartitionType get_part_type(u8* first_sector) {
-	if (first_sector == NULL) {
-		WARNING_LOG("Null pointer passed for first sector.\n");
-		return UNK;
-	}
+typedef struct {
+    u64 start_lba;          // Absolute LBA on disk
+	u64 num_sectors;        // Number of Sectors
+    u64 size;               // Partition Size in bytes
+    PartitionScheme scheme; // Partition Scheme
 
-	if (((u16*) first_sector)[255] == 0xAA55) return MBR;
-	
-	// TODO: missing gpt check
-	
-	return UNK;
-}
+    /* Optional Metadata */
+    union {
+		struct {
+			bool bootable;
+			u8 mbr_type;
+		} mbr_info;
+		
+		struct {
+			u8 type_guid[16];
+			u8 part_guid[16];
+			char part_name[72];
+		} gpt_info;
+	};
+} partition_t;
 
-static void print_part_entry(const u8* part_entry) {
-	if (part_entry == NULL) return;
-	
-	printf("\t\tstatus: 0x%02X\n", part_entry[0]);
-	
-	printf("\t\tCHS address (first absolute sector): 0x");
-	for (int i = 2; i >= 0; --i) printf("%02X", part_entry[1 + i]);
-	printf("\n");
-
-	printf("\t\tpartition type: 0x%X\n", part_entry[4]);
-	
-	printf("\t\tCHS address (last absolute sector): 0x");
-	for (int i = 2; i >= 0; --i) printf("%02X", part_entry[5 + i]);
-	printf("\n");
-	
-	printf("\t\tLBA first absolute sector: 0x%X\n", *(u32*) (part_entry + 8));
-
-	const u32 num_sectors = *(u32*) (part_entry + 12);
-	const u64 size_in_bytes = num_sectors * 512;
-	printf("\t\tNum of Sectors: %u (Size in Bytes %llu)\n", num_sectors, size_in_bytes);
-
+static void print_gpt_part_info(const partition_t partition) {
+	(void) partition;
 	return;
 }
 
-static void get_mbr_info(u8* first_sector) {
-	if (first_sector == NULL) return;
+static void print_mbr_part_info(const partition_t partition) {
+	printf("\n -- MBR Partition Info --\n");
+	printf("  -> Bootable: %s\n", partition.mbr_info.bootable ? "YES" : "NO");
+	printf("  -> Partition Type: 0x%X\n", partition.mbr_info.mbr_type);
+	printf("  -> LBA First Absolute Sector: 0x%llX\n", partition.start_lba);
+	printf("  -> Num of Sectors: %llu (Size in Bytes %llu)\n", partition.num_sectors, partition.size);
+	printf(" ------------------------- \n\n");
+	return;
+}
 
-	printf("\n -- MBR Info --\n");
+#define MBR_PARTITION_ENTRIES_COUNT 4
+#define MBR_EMPTY_PARTITION 0x00
+#define MBR_GPT_PROTECTIVE  0xEE
+#define FIRST_MBR_PARTITION_OFFSET 0x1BE
+static void parse_mbr_entries(const u8* first_sector, partition_t* partitions, unsigned int* partitions_cnt) {
+	if (first_sector == NULL || partitions == NULL || partitions_cnt == NULL) return;
+	
+	for (unsigned int i = 0; i < MBR_PARTITION_ENTRIES_COUNT; ++i) {
+		partition_t* partition = partitions + *partitions_cnt;
+		const u8* part_entry = first_sector + FIRST_MBR_PARTITION_OFFSET + i * 16;
+		
+		// Check if the partition entry is empty 
+		const u8 part_type = part_entry[4];
+		if (part_type == MBR_EMPTY_PARTITION) continue;
 
-	for (u8 i = 0; i < 4; ++i) {
-		const u8* part_entry = first_sector + 0x1BE + i * 16;
-		printf(" -> Partition Entry %u:\n", i);
-		print_part_entry(part_entry);
+		partition -> scheme = MBR;
+		partition -> mbr_info.bootable = QCOW_TO_BOOL(part_entry[0] & 0x80);
+		partition -> mbr_info.mbr_type = part_type;
+		partition -> start_lba = *(u32*) (part_entry + 8);
+		partition -> num_sectors = *(u32*) (part_entry + 12);
+		partition -> size = partition -> num_sectors * 512;
+		
+		(*partitions_cnt)++;
+	}
+	
+	return;
+}
+
+static partition_t* parse_part_scheme(const u8* first_sector, const PartitionScheme partition_scheme, unsigned int* partitions_cnt) {
+	if (first_sector == NULL || partitions_cnt == NULL) return NULL;
+	
+	*partitions_cnt = 0;
+	partition_t* partitions = NULL;
+
+	if (partition_scheme == MBR) {
+		QCOW_SAFE_CALLOC(partitions, MBR_PARTITION_ENTRIES_COUNT, sizeof(partition_t), NULL);
+		parse_mbr_entries(first_sector, partitions, partitions_cnt);
+		QCOW_SAFE_REALLOC(partitions, *partitions_cnt * sizeof(partition_t), NULL);
+		return partitions;
 	}
 
-	printf(" -> 32-bit disk signature: 0x%04X\n", *(u32*) (first_sector + 0x1B8));
-	printf(" -> copy-protection: 0x%04X\n", *(u32*) (first_sector + 0x1BC));
+	TODO("Parse GPT scheme");
 
-	printf(" -------------- \n");
+	return partitions;
+}
+
+static void parse_partitions(const u8* first_sector) {
+	if (first_sector == NULL) return;
+
+	// Check that at LBA 0, there is either a MBR or a Protective MBR
+	if (((u16*) first_sector)[255] != 0xAA55) return;
+	
+	PartitionScheme part_scheme = MBR;
+	const u8 part_type = first_sector[FIRST_MBR_PARTITION_OFFSET + 4];
+	if (part_type == MBR_GPT_PROTECTIVE) part_scheme = GPT;
+
+	unsigned int partitions_cnt = 0;
+	partition_t* partitions = parse_part_scheme(first_sector, part_scheme, &partitions_cnt);
+	if (partitions == NULL) return;
+
+	for (unsigned int i = 0; i < partitions_cnt; ++i) {
+		if (part_scheme) print_mbr_part_info(partitions[i]);
+		else print_gpt_part_info(partitions[i]);
+	}
 
 	return;
 }
@@ -100,17 +147,14 @@ void get_first_sector(const char* path_qcow) {
 		return;
 	}
 	
-	PartitionType part_type = get_part_type(data);
-	DEBUG_LOG("Partition Type: '%s'\n", partition_type_str[part_type]);
+	parse_partitions(data);
 
-	DEBUG_LOG("Data, in address range (0x%llX - 0x%llX):\n", offset, offset + size);
+	printf("Data, in address range (0x%llX - 0x%llX):\n", offset, offset + size);
 	for (u64 i = 0; i < size; i += 16) {
 		printf("[0x%03llX:%03llX]: ", offset + i, offset + i + 16);
 		for (u8 j = 0; j < 16; ++j) printf("%02X ", data[i + j]);
 		printf("\n");
 	}
-
-	if (part_type == MBR) get_mbr_info(data);
 
 	deinit_qcow(&qcow_ctx);
 
