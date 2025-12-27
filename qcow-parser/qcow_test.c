@@ -50,8 +50,8 @@ int main(int argc, char* argv[]) {
 
 	const char* path_qcow = argv[1];
 	
-	QCowMetadata qcow_metadata = {0};
-	if (parse_qcow(&qcow_metadata, path_qcow) < 0) {
+	QCowCtx qcow_ctx = {0};
+	if (init_qcow(&qcow_ctx, path_qcow) < 0) {
 		WARNING_LOG("Failed to parse the qcow image.\n");
 		return -1;
 	}
@@ -60,24 +60,24 @@ int main(int argc, char* argv[]) {
 	unsigned char data[32] = {0};
 	data[7] = 0x07;
 	data[10] = 0x10;
-	int ret = qwrite(data, sizeof(unsigned char), 32, offset, qcow_metadata);
+	int ret = qwrite(data, sizeof(unsigned char), 32, offset, qcow_ctx);
 	if (ret < 0) {
 		WARNING_LOG("Failed to write %u bytes at address 0x%llX, err: '%s'\n", 32, offset, qcow_errors_str[-ret]);
-		deallocate_qcow_metadata(&qcow_metadata);
+		deinit_qcow(&qcow_ctx);
 		return -QCOW_IO_ERROR;
 	}
 
-	ret = qread(data, sizeof(unsigned char), 32, offset, qcow_metadata);
+	ret = qread(data, sizeof(unsigned char), 32, offset, qcow_ctx);
 	if (ret < 0) {
 		WARNING_LOG("Failed to read %u bytes at LBA 0x%llX, ret: %d - '%s'\n", 32, offset, ret, qcow_errors_str[-ret]);
-		deallocate_qcow_metadata(&qcow_metadata);
+		deinit_qcow(&qcow_ctx);
 		return -1;
 	}
 	
 	DEBUG_LOG("Data, in address range (0x%llX - 0x%llX):\n", offset, offset + 32);
 	for (unsigned char i = 0; i < 32; ++i) printf("[0x%llX]: 0x%X\n", offset + i, data[i]);
 
-	deallocate_qcow_metadata(&qcow_metadata);
+	deinit_qcow(&qcow_ctx);
 
 	return 0;
 }

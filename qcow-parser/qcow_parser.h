@@ -37,7 +37,7 @@
 #ifndef _QCOW_PARSER_H_
 #define _QCOW_PARSER_H_
 
-#include "./utils.h"
+#include "../common/utils.h"
 #include "./xcomp.h" // TODO: Note that ZSTD is missing a compressor
 
 /* -------------------------------------------------------------------------------------------------------- */
@@ -68,52 +68,6 @@
 // -------
 //  Enums
 // -------
-typedef enum PACKED_STRUCT QCowErrors { 
-    QCOW_NO_ERROR = 0, 
-    QCOW_IO_ERROR, 
-    QCOW_INVALID_OFFSET, 
-    QCOW_UNALLOCATED_CLUSTER, 
-    QCOW_DEFLATE_ERROR, 
-    QCOW_INVALID_MAGIC, 
-    QCOW_INVALID_VERSION, 
-    QCOW_CLUSTER_BITS_TOO_SMALL, 
-    QCOW_INVALID_COMPRESSION_TYPE, 
-    QCOW_USE_OF_RESERVED_FIELD, 
-    QCOW_UNALLOCATED_L1_TABLE, 
-    QCOW_CORRUPTED_IMAGE, 
-    QCOW_INVALID_REF_CNT_ORDER, 
-    QCOW_MISSING_COMPRESSION_TYPE_FIELD, 
-	QCOW_EMPTY_BACKING_FILE,	
-    QCOW_INVALID_BACKING_FILE_OFFSET,
-	QCOW_UNINITIALIZED_ERDF,
-	QCOW_INVALID_SUBCLUSTER_BITMAP,
-	QCOW_UNALIGNED_CLUSTER,
-	QCOW_TODO 
-} QCowErrors;
-
-static const char* qcow_errors_str[] = { 
-    "QCOW_NO_ERROR", 
-    "QCOW_IO_ERROR", 
-    "QCOW_INVALID_OFFSET", 
-    "QCOW_UNALLOCATED_CLUSTER", 
-    "QCOW_DEFLATE_ERROR", 
-    "QCOW_INVALID_MAGIC", 
-    "QCOW_INVALID_VERSION", 
-    "QCOW_CLUSTER_BITS_TOO_SMALL", 
-    "QCOW_INVALID_COMPRESSION_TYPE", 
-    "QCOW_USE_OF_RESERVED_FIELD", 
-    "QCOW_UNALLOCATED_L1_TABLE", 
-    "QCOW_CORRUPTED_IMAGE", 
-    "QCOW_INVALID_REF_CNT_ORDER", 
-    "QCOW_MISSING_COMPRESSION_TYPE_FIELD", 
-	"QCOW_EMPTY_BACKING_FILE",	
-    "QCOW_INVALID_BACKING_FILE_OFFSET",
-	"QCOW_UNINITIALIZED_ERDF",
-	"QCOW_INVALID_SUBCLUSTER_BITMAP",
-	"QCOW_UNALIGNED_CLUSTER",
-    "QCOW_TODO" 
-};
-
 typedef enum PACKED_STRUCT QCowExtType {
     HEADER_EXT_END = 0,
     BACKING_FILE_NAME,
@@ -961,8 +915,9 @@ static inline int get_ref_cnt(QCowCtx qcow_ctx, u64 offset, u64* ref_cnt) {
 		WARNING_LOG("Invalid offset: 0x%llX\n", offset);
 		return -QCOW_INVALID_OFFSET;
 	} else if ((qcow_ctx.refcount_table)[refcount_table_index] == NULL) {
-		WARNING_LOG("Unallocated refcount table and clusters.\n");
-		return -QCOW_UNALLOCATED_CLUSTER;
+		DEBUG_LOG("Unallocated refcount table and clusters.\n");
+		*ref_cnt = 0;
+		return QCOW_NO_ERROR;
 	}
 	
 	mem_cpy(ref_cnt, QCOW_CAST_PTR((qcow_ctx.refcount_table)[refcount_table_index], unsigned char) + refcount_block_index * qcow_ctx.refcount_bytes, qcow_ctx.refcount_bytes);

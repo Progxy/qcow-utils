@@ -23,5 +23,5 @@ The utility has been tested with the [Arch Linux](https://geo.mirror.pkgbuild.co
 ## References
 
 - [qcow format specification](https://github.com/zchee/go-qcow2/blob/master/docs/specification.md) 
-- [qemu official specification](https://github.com/qemu/qemu/blob/master/docs/interop/qcow2.txt)
+- [qemu official specification](https://github.com/qemu/qemu/blob/master/docs/interop/qcow2.rst)
 

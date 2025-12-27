@@ -18,10 +18,27 @@
 #ifndef _QCOW_UTILS_H_
 #define _QCOW_UTILS_H_
 
-#ifdef _QCOW_PRINTING_UTILS_
+#ifdef _QCOW_SPECIAL_TYPE_SUPPORT_
+
+typedef unsigned char bool;
+
+typedef unsigned char      u8;
+typedef unsigned short int u16;
+typedef unsigned int       u32;
+typedef unsigned long long u64;
+
+#define STATIC_ASSERT          _Static_assert
+STATIC_ASSERT(sizeof(u8)   == 1,  "u8  must be 1 bytes");
+STATIC_ASSERT(sizeof(u16)  == 2,  "u16 must be 2 bytes");
+STATIC_ASSERT(sizeof(u32)  == 4,  "u32 must be 4 bytes");
+STATIC_ASSERT(sizeof(u64)  == 8,  "u64 must be 8 bytes");
+
+#endif //_QCOW_SPECIAL_TYPE_SUPPORT_
+
 // -------------------------------
 // Printing Macros
 // -------------------------------
+#ifdef _QCOW_PRINTING_UTILS_
 #define RED           "\033[31m"
 #define GREEN         "\033[32m"
 #define PURPLE        "\033[35m"
@@ -36,7 +53,7 @@
 
 #define COLOR_STR(str, COLOR) COLOR str RESET_COLOR
 #define WARNING_LOG(format, ...) printf(COLOR_STR("WARNING:" __FILE__ ":%u: ", BRIGHT_YELLOW) format, __LINE__, ##__VA_ARGS__)
-#define TODO(msg) printf(COLOR_STR("TODO: " __FILE__ ":%u: ", TODO_COLOR) msg "\n", __LINE__), assert(FALSE)
+#define TODO(msg) printf(COLOR_STR("TODO: " __FILE__ ":%u: ", TODO_COLOR) msg "\n", __LINE__)
 
 #ifdef _DEBUG
 	#define DEBUG_LOG(format, ...) printf(COLOR_STR("DEBUG:" __FILE__ ":%u: ", DEBUG_COLOR) format, __LINE__, ##__VA_ARGS__)
@@ -58,6 +75,7 @@
 #define QCOW_MASK_BITS_PRECEDING(bit_index) ((1ULL << (bit_index)) - 1)
 #define QCOW_ARR_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #define QCOW_CAST_PTR(ptr, type) ((type*) (ptr))
+#define QCOW_TO_BOOL(val) (!!(val))
 
 #ifndef _QCOW_CUSTOM_ALLOCATORS_
 	#define qcow_calloc  calloc
@@ -69,6 +87,24 @@
 		#include <stophere>
 	#endif // check definitions
 #endif //_QCOW_CUSTOM_ALLOCATORS_
+
+#define QCOW_SAFE_CALLOC(var, nmemb, size, fail_ret_val)                                              \
+do {                                                                                                  \
+	var = qcow_calloc((nmemb), (size));                                                               \
+	if (var == NULL) {                                                                                \
+		WARNING_LOG("Failed to perform calloc on " #var " with size %llu\n", (u64) (nmemb) * (size)); \
+		return fail_ret_val;                                                                          \
+	}                                                                                                 \
+} while(0)
+
+#define QCOW_SAFE_REALLOC(var, size, fail_ret_val) 						                     \
+do {                      															         \
+	(var) = qcow_realloc((var), (size));                                                     \
+	if ((var) == NULL) {                                                                     \
+		WARNING_LOG("Failed to perform realloc on " #var " with size %llu\n", (u64) (size)); \
+		return fail_ret_val;                                                                 \
+	}                                                                                        \
+} while(0)
 
 #ifndef MIN
 	#define MIN(a, b) (a < b ? a : b)
@@ -196,6 +232,71 @@ UNUSED_FUNCTION static int str_n_cmp(const char* str1, const char* str2, size_t 
 }
 
 #endif //_QCOW_UTILS_IMPLEMENTATION_
+
+// -------
+//  Enums
+// -------
+typedef enum PACKED_STRUCT QCowErrors { 
+    QCOW_NO_ERROR = 0, 
+    QCOW_IO_ERROR, 
+    QCOW_INVALID_OFFSET, 
+    QCOW_UNALLOCATED_CLUSTER, 
+    QCOW_DEFLATE_ERROR, 
+    QCOW_INVALID_MAGIC, 
+    QCOW_INVALID_VERSION, 
+    QCOW_CLUSTER_BITS_TOO_SMALL, 
+    QCOW_INVALID_COMPRESSION_TYPE, 
+    QCOW_USE_OF_RESERVED_FIELD, 
+    QCOW_UNALLOCATED_L1_TABLE, 
+    QCOW_CORRUPTED_IMAGE, 
+    QCOW_INVALID_REF_CNT_ORDER, 
+    QCOW_MISSING_COMPRESSION_TYPE_FIELD, 
+	QCOW_EMPTY_BACKING_FILE,	
+    QCOW_INVALID_BACKING_FILE_OFFSET,
+	QCOW_UNINITIALIZED_ERDF,
+	QCOW_INVALID_SUBCLUSTER_BITMAP,
+	QCOW_UNALIGNED_CLUSTER,
+	QCOW_INVALID_PARAMETERS,
+	QCOW_INVALID_DISK,
+	QCOW_FAILED_PARSING_PARTITIONS,
+	QCOW_INVALID_GPT_ENTRY,
+	QCOW_GPT_INVALID_SIGNATURE,
+	QCOW_GPT_INVALID_REVISION,
+	QCOW_GPT_INVALID_HEADER_SIZE,
+	QCOW_GPT_INVALID_RSV,
+	QCOW_TODO 
+} QCowErrors;
+
+static const char* qcow_errors_str[] = { 
+    "QCOW_NO_ERROR", 
+    "QCOW_IO_ERROR", 
+    "QCOW_INVALID_OFFSET", 
+    "QCOW_UNALLOCATED_CLUSTER", 
+    "QCOW_DEFLATE_ERROR", 
+    "QCOW_INVALID_MAGIC", 
+    "QCOW_INVALID_VERSION", 
+    "QCOW_CLUSTER_BITS_TOO_SMALL", 
+    "QCOW_INVALID_COMPRESSION_TYPE", 
+    "QCOW_USE_OF_RESERVED_FIELD", 
+    "QCOW_UNALLOCATED_L1_TABLE", 
+    "QCOW_CORRUPTED_IMAGE", 
+    "QCOW_INVALID_REF_CNT_ORDER", 
+    "QCOW_MISSING_COMPRESSION_TYPE_FIELD", 
+	"QCOW_EMPTY_BACKING_FILE",	
+    "QCOW_INVALID_BACKING_FILE_OFFSET",
+	"QCOW_UNINITIALIZED_ERDF",
+	"QCOW_INVALID_SUBCLUSTER_BITMAP",
+	"QCOW_UNALIGNED_CLUSTER",
+	"QCOW_INVALID_PARAMETERS",
+	"QCOW_INVALID_DISK",
+	"QCOW_FAILED_PARSING_PARTITIONS",
+	"QCOW_INVALID_GPT_ENTRY",
+	"QCOW_GPT_INVALID_SIGNATURE",
+	"QCOW_GPT_INVALID_REVISION",
+	"QCOW_GPT_INVALID_HEADER_SIZE",
+	"QCOW_GPT_INVALID_RSV",
+    "QCOW_TODO" 
+};
 
 #endif //_QCOW_UTILS_H_
 
