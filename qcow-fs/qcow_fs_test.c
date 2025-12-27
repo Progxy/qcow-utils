@@ -17,7 +17,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "qcow_part.h"
+#include "./qcow_fs.h"
 
 int main(void) {
 	if (init_qcow_part("../Arch-Linux-x86_64-basic.qcow2")) {
@@ -34,8 +34,10 @@ int main(void) {
 	}
 	
 	for (unsigned int i = 0; i < partitions_cnt; ++i) print_part_info(partitions[i]);
-	QCOW_SAFE_FREE(partitions);
 
+	parse_fat32(partitions[1]);
+	QCOW_SAFE_FREE(partitions);
+	
 	deinit_qcow_part();
 
 	return 0;

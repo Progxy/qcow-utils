@@ -29,7 +29,7 @@ typedef enum PartitionScheme { MBR = 0, GPT = 1, UNK = 2 } PartitionScheme;
 const char* partition_scheme_str[] = { "MBR", "GPT", "UNK" };
 
 typedef enum {
-#define GPT_HEADER_SIGNATURE 0x5452415020494645
+#define GPT_HEADER_SIGNATURE      0x5452415020494645
 	GPT_REVISION_1_0            = 0x00010000,
 	GPT_MIN_HEADER_SIZE         = 92,
 	MBR_SIGNATURE               = 0xAA55,
@@ -43,7 +43,7 @@ typedef enum {
 typedef u8 guid_t[16];
 typedef char part_name_t[72];
 
-typedef struct {
+typedef struct PACKED_STRUCT {
 	guid_t partition_type;
 	guid_t unique_partition;
 	u64 starting_lba;
@@ -52,7 +52,7 @@ typedef struct {
 	part_name_t name;
 } gpt_entry_t;
 
-typedef struct {
+typedef struct PACKED_STRUCT {
 	u64 gpt_signature;
 	u32 revision;
 	u32 header_size;
