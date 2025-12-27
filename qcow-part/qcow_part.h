@@ -23,9 +23,22 @@
 #define _QCOW_SPECIAL_TYPE_SUPPORT_
 #include "../common/utils.h"
 #include "../qcow-parser/qcow_parser.h"
+#include "./crc_32.h"
 
 typedef enum PartitionScheme { MBR = 0, GPT = 1, UNK = 2 } PartitionScheme;
 const char* partition_scheme_str[] = { "MBR", "GPT", "UNK" };
+
+typedef enum {
+#define GPT_HEADER_SIGNATURE 0x5452415020494645
+	GPT_REVISION_1_0            = 0x00010000,
+	GPT_MIN_HEADER_SIZE         = 92,
+	MBR_SIGNATURE               = 0xAA55,
+	MBR_PARTITION_ENTRIES_COUNT = 4,
+	MBR_EMPTY_PARTITION         = 0x00,
+	MBR_GPT_PROTECTIVE          = 0xEE,
+	FIRST_MBR_PARTITION_OFFSET  = 0x1BE,
+	SECTOR_SIZE = 512,
+} PartitionConstants;
 
 typedef u8 guid_t[16];
 typedef char part_name_t[72];
@@ -81,12 +94,19 @@ typedef struct {
 static QCowCtx qcow_ctx = {0};
 
 // Utility Functions
-static inline void print_guid(const guid_t guid) {
-	for (int i = (sizeof(guid_t) / 4) - 1; i >= 0; --i) {
-		printf("%08X", ((u32*) guid)[i]);
-		if (i != 0) printf("-");
-	}
-	return;
+static inline void print_guid(const guid_t g) {
+    printf(
+		"%02X%02X%02X%02X-"
+		"%02X%02X-"
+		"%02X%02X-"
+		"%02X%02X-"
+		"%02X%02X%02X%02X%02X%02X",
+		g[3], g[2], g[1], g[0],                   /* Data1 */
+		g[5], g[4],                               /* Data2 */
+		g[7], g[6],                               /* Data3 */
+		g[8], g[9],                               /* Data4 (first 2 bytes) */
+		g[10], g[11], g[12], g[13], g[14], g[15]
+	);
 }
 
 static inline u64 align(const u64 val, const u64 alignment) {
@@ -102,7 +122,6 @@ static inline void print_part_name(const part_name_t name) {
 	return;
 }
 
-#define SECTOR_SIZE 512
 #define get_sector_at(n, data) get_n_sector_at(n, 1, data)
 static int get_n_sector_at(const unsigned int at, const unsigned int cnt, u8* data) {
 	if (data == NULL) return -QCOW_INVALID_PARAMETERS;
@@ -178,7 +197,7 @@ static void print_part_info(const partition_t partition) {
 		return;
 	}
 	
-	printf("  -> Start LBA:             0x%llX\n", partition.start_lba);
+	printf("  -> Start LBA:             %llu\n", partition.start_lba);
 	printf("  -> Num of Sectors:        %llu\n", partition.num_sectors);
 	printf("  -> Size in Bytes:         %llu\n", partition.size);
 	
@@ -197,15 +216,11 @@ static void print_part_info(const partition_t partition) {
 		printf("'\n");
 	}
 
-	printf(" ------------------------- \n\n");
+	printf(" ------------------------- \n");
 	return;
 }
 
 // Partition Functions
-#define MBR_PARTITION_ENTRIES_COUNT 4
-#define MBR_EMPTY_PARTITION 0x00
-#define MBR_GPT_PROTECTIVE  0xEE
-#define FIRST_MBR_PARTITION_OFFSET 0x1BE
 static void parse_mbr_entries(const u8* first_sector, partition_t* partitions, unsigned int* partitions_cnt) {
 	if (first_sector == NULL || partitions == NULL || partitions_cnt == NULL) return;
 	
@@ -262,6 +277,13 @@ static int parse_gpt_entry_array(const gpt_header_t gpt_header, partition_t* par
 		WARNING_LOG("Failed to retrieve sector %llu from given qcow file.\n", gpt_header.partition_entry_lba);
 		return -QCOW_IO_ERROR;
 	}
+	
+	u32 check_crc = crc32(entries_array_ptr, gpt_header.num_of_partition_entries * gpt_header.size_of_partition_entries);
+	if (check_crc != gpt_header.partition_entry_array_crc32) {
+		QCOW_SAFE_FREE(entries_array_ptr);
+		WARNING_LOG("Invalid CRC32 Checksum, expected: 0x%X, but calculated: 0x%X\n", gpt_header.partition_entry_array_crc32, check_crc);
+		return -QCOW_INVALID_CRC_CHECKSUM;
+	}
 
 	printf("\n -- GPT Partition Entry Array Info --\n");
 
@@ -298,9 +320,6 @@ static int parse_gpt_entry_array(const gpt_header_t gpt_header, partition_t* par
 	return QCOW_NO_ERROR;
 }
 
-#define GPT_HEADER_SIGNATURE 0x5452415020494645
-#define GPT_REVISION_1_0     0x00010000
-#define GPT_MIN_HEADER_SIZE  92
 static int parse_gpt_header(u8* gpt_header_ptr, gpt_header_t* gpt_header) {
 	mem_cpy(gpt_header, gpt_header_ptr, sizeof(gpt_header_t));
 	gpt_header_ptr += sizeof(gpt_header_t);
@@ -320,9 +339,15 @@ static int parse_gpt_header(u8* gpt_header_ptr, gpt_header_t* gpt_header) {
 		return -QCOW_GPT_INVALID_HEADER_SIZE;
 	}
 	
-	// TODO: Validate CRC_32s
-	TODO("Missing validation of GPT Header CRC_32.");
-	TODO("Missing validation of GPT Entries Array CRC_32.");
+	gpt_header_t crc_gpt = {0};
+	mem_cpy(&crc_gpt, gpt_header, sizeof(gpt_header_t));
+	crc_gpt.header_crc32 = 0;
+
+	u32 check_crc = crc32((const u8*) &crc_gpt, gpt_header -> header_size);
+	if (check_crc != gpt_header -> header_crc32) {
+		WARNING_LOG("Invalid CRC32 Checksum, expected: 0x%X, but calculated: 0x%X\n", gpt_header -> header_crc32, check_crc);
+		return -QCOW_INVALID_CRC_CHECKSUM;
+	}
 
 	if (gpt_header -> rsv_1 != 0) {
 		WARNING_LOG("Reserved Field must be zero: 0x%X\n", gpt_header -> rsv_1);
@@ -339,52 +364,78 @@ static int parse_gpt_header(u8* gpt_header_ptr, gpt_header_t* gpt_header) {
 	return QCOW_NO_ERROR;
 }
 
-static partition_t* parse_part_scheme(const u8* first_sector, const PartitionScheme partition_scheme, unsigned int* partitions_cnt) {
-	if (first_sector == NULL || partitions_cnt == NULL) return NULL;
+static int parse_gpt_entries(const u8* gpt_sector, partition_t** partitions, unsigned int* partitions_cnt, const bool store_partitions) {
+	int err = 0;
+	gpt_header_t gpt_header = {0};
+	if ((err = parse_gpt_header((u8*) gpt_sector, &gpt_header))) {
+		WARNING_LOG("Failed to parse GPT Header - '%s'.\n", qcow_errors_str[-err]);
+		return err;
+	}
+	
+	print_gpt_header_info(gpt_header);
+	
+	if (store_partitions) {
+		QCOW_SAFE_CALLOC(*partitions, gpt_header.num_of_partition_entries, sizeof(partition_t), -QCOW_IO_ERROR);
+		
+		if ((err = parse_gpt_entry_array(gpt_header, *partitions, partitions_cnt))) {
+			QCOW_SAFE_FREE(*partitions);
+			*partitions_cnt = 0;
+			WARNING_LOG("Failed to parse GPT Entry Array - '%s'.\n", qcow_errors_str[-err]);
+			return err;
+		}
+		
+		QCOW_SAFE_REALLOC(*partitions, *partitions_cnt * sizeof(partition_t), -QCOW_IO_ERROR);
+	}
+	
+	return QCOW_NO_ERROR;
+}
+
+static int parse_part_scheme(const u8* first_sector, const PartitionScheme partition_scheme, partition_t** partitions, unsigned int* partitions_cnt) {
+	if (first_sector == NULL || partitions_cnt == NULL) return -QCOW_INVALID_PARAMETERS;
 	
 	*partitions_cnt = 0;
-	partition_t* partitions = NULL;
-
 	if (partition_scheme == MBR) {
-		QCOW_SAFE_CALLOC(partitions, MBR_PARTITION_ENTRIES_COUNT, sizeof(partition_t), NULL);
-		parse_mbr_entries(first_sector, partitions, partitions_cnt);
-		QCOW_SAFE_REALLOC(partitions, *partitions_cnt * sizeof(partition_t), NULL);
-		return partitions;
+		QCOW_SAFE_CALLOC(*partitions, MBR_PARTITION_ENTRIES_COUNT, sizeof(partition_t), -QCOW_IO_ERROR);
+		parse_mbr_entries(first_sector, *partitions, partitions_cnt);
+		QCOW_SAFE_REALLOC(*partitions, *partitions_cnt * sizeof(partition_t), -QCOW_IO_ERROR);
+		return QCOW_NO_ERROR;
 	}
 
 	// Retrieve LBA1
 	u8 second_sector[SECTOR_SIZE] = {0};
 	if (get_sector_at(1, second_sector) < 0) {
 		WARNING_LOG("Failed to retrieve second sector from given qcow file.\n");
-		return partitions;
+		return -QCOW_IO_ERROR;
 	}
 
-	int err = 0;
-	gpt_header_t gpt_header = {0};
-	if ((err = parse_gpt_header(second_sector, &gpt_header))) {
-		WARNING_LOG("Failed to parse GPT Header - '%s'.\n", qcow_errors_str[-err]);
-		return partitions;
+	int err = parse_gpt_entries(second_sector, partitions, partitions_cnt, TRUE);
+	if ((-err >= QCOW_GPT_INVALID_SIGNATURE) && (-err <= QCOW_GPT_INVALID_RSV)) {
+		DEBUG_LOG("Failed to parse the Primary GPT Header.\n");
+	} else if (err < 0) return err;
+	
+	// Retrieve last LBA
+	u8 last_sector[SECTOR_SIZE] = {0};
+	if (get_sector_at((qcow_ctx.size / SECTOR_SIZE) - 1, last_sector) < 0) {
+		WARNING_LOG("Failed to retrieve last sector from given qcow file.\n");
+		return -QCOW_IO_ERROR;
 	}
 	
-	print_gpt_header_info(gpt_header);
-	
-	QCOW_SAFE_CALLOC(partitions, gpt_header.num_of_partition_entries, sizeof(partition_t), NULL);
-	
-	if ((err = parse_gpt_entry_array(gpt_header, partitions, partitions_cnt))) {
-		QCOW_SAFE_FREE(partitions);
-		WARNING_LOG("Failed to parse GPT Entry Array - '%s'.\n", qcow_errors_str[-err]);
-		return partitions;
+	err = parse_gpt_entries(last_sector, partitions, partitions_cnt, *partitions != NULL);
+	if ((-err >= QCOW_GPT_INVALID_SIGNATURE) && (-err <= QCOW_GPT_INVALID_RSV)) {
+		if (*partitions == NULL) {
+			WARNING_LOG("Failed to parse both the Primary and Backup GPT Headers.\n");
+			return err;
+		}
+
+		DEBUG_LOG("Failed to parse the Backup GPT Header.\n");
+	} else if (err < 0) {
+		if (*partitions == NULL) return err;
 	}
-	
-	QCOW_SAFE_REALLOC(partitions, *partitions_cnt * sizeof(partition_t), NULL);
 
-	TODO("Missing check of the Backup GPT Header.");
-
-	return partitions;
+	return QCOW_NO_ERROR;
 }
 
-#define MBR_SIGNATURE 0xAA55
-static int parse_partitions(void) {
+static int parse_partitions(partition_t** partitions, unsigned int* partitions_cnt) {
 	int err = 0;
 	
 	// Retrieve LBA0
@@ -401,16 +452,11 @@ static int parse_partitions(void) {
 	const u8 part_type = first_sector[FIRST_MBR_PARTITION_OFFSET + 4];
 	if (part_type == MBR_GPT_PROTECTIVE) part_scheme = GPT;
 
-	unsigned int partitions_cnt = 0;
-	partition_t* partitions = parse_part_scheme(first_sector, part_scheme, &partitions_cnt);
-	if (partitions == NULL) {
+	*partitions_cnt = 0;
+	if ((err = parse_part_scheme(first_sector, part_scheme, partitions, partitions_cnt)) < 0) {
 		WARNING_LOG("Failed to parse the partition scheme.\n");
-		return -QCOW_FAILED_PARSING_PARTITIONS;
+		return err;
 	}
-
-	for (unsigned int i = 0; i < partitions_cnt; ++i) print_part_info(partitions[i]);
-
-	QCOW_SAFE_FREE(partitions);
 
 	return QCOW_NO_ERROR;
 }

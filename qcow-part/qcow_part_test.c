@@ -8,13 +8,18 @@ int main(void) {
 		return 1;
 	}
 
-	if (parse_partitions()) {
+	partition_t* partitions = NULL;
+	unsigned int partitions_cnt = 0;
+	if (parse_partitions(&partitions, &partitions_cnt)) {
 		WARNING_LOG("Failed to parse the partitions.\n");
 		deinit_qcow_part();
 		return 1;
 	}
 	
+	for (unsigned int i = 0; i < partitions_cnt; ++i) print_part_info(partitions[i]);
+	QCOW_SAFE_FREE(partitions);
+
 	deinit_qcow_part();
-	
+
 	return 0;
 }
