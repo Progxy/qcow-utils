@@ -35,7 +35,7 @@ int main(void) {
 	
 	for (unsigned int i = 0; i < partitions_cnt; ++i) print_part_info(partitions[i]);
 
-	parse_fat32(partitions[1]);
+	parse_fat(partitions[1]);
 	QCOW_SAFE_FREE(partitions);
 	
 	deinit_qcow_part();

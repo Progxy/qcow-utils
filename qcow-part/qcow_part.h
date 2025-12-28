@@ -123,7 +123,7 @@ static inline void print_part_name(const part_name_t name) {
 }
 
 #define get_sector_at(n, data) get_n_sector_at(n, 1, data)
-static int get_n_sector_at(const unsigned int at, const unsigned int cnt, u8* data) {
+static int get_n_sector_at(const unsigned int at, const unsigned int cnt, void* data) {
 	if (data == NULL) return -QCOW_INVALID_PARAMETERS;
 
 	int err = 0;
