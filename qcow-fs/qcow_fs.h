@@ -28,6 +28,18 @@
 typedef enum { FAT12 = 0, FAT16 = 1, FAT32 = 2, NOT_FAT = 3 } FatType;
 const char* fat_type_str[] = { "FAT12", "FAT16", "FAT32", "NOT_FAT" };
 
+typedef enum { 
+	CLNSHUTBITMASK     = 0x08000000,
+	HRDERRBITMASK      = 0x04000000,
+	FAT_ATTR_READ_ONLY = 0x01,
+	FAT_ATTR_HIDDEN    = 0x02,
+	FAT_ATTR_SYSTEM    = 0x04,
+	FAT_ATTR_VOLUME_ID = 0x08,
+	FAT_ATTR_DIRECTORY = 0x10,
+	FAT_ATTR_ARCHIVE   = 0x20,
+	FAT_ATTR_LFN       = 0x0F,
+} QCowFsConstants;
+
 typedef struct PACKED_STRUCT {
 	u8  jmp_boot[3];
 	u64 oem_name;
@@ -74,6 +86,37 @@ typedef struct PACKED_STRUCT {
 	u8 _rsv5[420];
 	u16 signature; // 0xAA55
 } bpb_sector_t;
+
+typedef struct PACKED_STRUCT {
+    u8  name[8];          // 0x00: Filename (space-padded)
+    u8  ext[3];           // 0x08: Extension (space-padded)
+    u8  attr;             // 0x0B: Attributes
+    u8  nt_reserved;      // 0x0C: Reserved for NT
+    u8  ctime_tenths;     // 0x0D: Creation time (tenths of sec)
+    u16 ctime;            // 0x0E: Creation time
+    u16 cdate;            // 0x10: Creation date
+    u16 adate;            // 0x12: Last access date
+    u16 cluster_high;     // 0x14: High 16 bits of first cluster (FAT32)
+    u16 mtime;            // 0x16: Last modification time
+    u16 mdate;            // 0x18: Last modification date
+    u16 cluster_low;      // 0x1A: Low 16 bits of first cluster
+    u32 size;             // 0x1C: File size in bytes
+} fat_dir_entry_t;
+
+typedef struct PACKED_STRUCT {
+    u8  order;            // 0x00: Sequence number (bit 6 = last)
+    u16 name1[5];         // 0x01: UTF-16 chars (1–5)
+    u8  attr;             // 0x0B: Always 0x0F
+    u8  type;             // 0x0C: Always 0
+    u8  checksum;         // 0x0D: Checksum of short name
+    u16 name2[6];         // 0x0E: UTF-16 chars (6–11)
+    u16 zero;             // 0x1A: Always 0
+    u16 name3[2];         // 0x1C: UTF-16 chars (12–13)
+} fat_lfn_entry_t;
+
+STATIC_ASSERT(sizeof(bpb_sector_t) == 512,   "BPB size mismatch");
+STATIC_ASSERT(sizeof(fat_dir_entry_t) == 32, "FAT dir entry size mismatch");
+STATIC_ASSERT(sizeof(fat_lfn_entry_t) == 32, "FAT LFN entry size mismatch");
 
 #include <inttypes.h>
 #include <ctype.h>
@@ -146,16 +189,85 @@ static void bpb_pretty_print(const bpb_sector_t* bpb) {
 	return;
 }
 
+static void print_attr(const u8 attr) {
+    printf("ATTR: [");
+	if (attr & FAT_ATTR_READ_ONLY) printf(" R");
+	if (attr & FAT_ATTR_HIDDEN)    printf(" H");
+	if (attr & FAT_ATTR_SYSTEM)    printf(" S");
+	if (attr & FAT_ATTR_VOLUME_ID) printf(" V");
+	if (attr & FAT_ATTR_DIRECTORY) printf(" D");
+	if (attr & FAT_ATTR_ARCHIVE)   printf(" A");
+    printf(" ] - 0x%X", attr);
+	return;
+}
+
+static void fat_print_dir_entry(const fat_dir_entry_t* e) {
+    char name[9] = {0};
+    char ext[4] = {0};
+
+    /* Copy and trim name */
+    for (int i = 0; i < 8; i++) name[i] = (e -> name[i] == ' ') ? '\0' : e -> name[i];
+    name[8] = '\0';
+
+    /* Copy and trim extension */
+    for (int i = 0; i < 3; i++) ext[i] = (e -> ext[i] == ' ') ? '\0' : e -> ext[i];
+    ext[3] = '\0';
+
+    /* Combine cluster */
+    u32 first_cluster = (((u32) e -> cluster_high) << 16) | e -> cluster_low;
+
+    printf("-------------\n");
+    printf("FAT DIR ENTRY\n");
+    printf("-------------\n");
+
+    if (ext[0]) printf("Name        : '%s.%s'\n", name, ext);
+    else        printf("Name        : '%s'\n", name);
+
+    print_attr(e -> attr);
+    printf("\n");
+
+    printf("FirstCluster: %u (0x%08X)\n", first_cluster, first_cluster);
+    printf("Size        : %u bytes\n", e -> size);
+
+    printf("Create Time : %04u-%02u-%02u %02u:%02u:%02u.%u\n",
+        ((e -> cdate >> 9) & 0x7F) + 1980,
+        (e -> cdate >> 5) & 0x0F,
+        e -> cdate & 0x1F,
+        (e -> ctime >> 11) & 0x1F,
+        (e -> ctime >> 5) & 0x3F,
+        (e -> ctime & 0x1F) * 2,
+        e -> ctime_tenths * 10
+    );
+
+    printf("Modify Time : %04u-%02u-%02u %02u:%02u:%02u\n",
+        ((e -> mdate >> 9) & 0x7F) + 1980,
+        (e -> mdate >> 5) & 0x0F,
+        e -> mdate & 0x1F,
+        (e -> mtime >> 11) & 0x1F,
+        (e -> mtime >> 5) & 0x3F,
+        (e -> mtime & 0x1F) * 2
+    );
+
+    printf("Last Access Time : %04u-%02u-%02u\n",
+        ((e -> adate >> 9) & 0x7F) + 1980,
+        (e -> adate >> 5) & 0x0F,
+        e -> adate & 0x1F
+    );
+
+    printf("\n");
+
+	return;
+}
+
 static inline u64 first_sector_of_cluster_n(const bpb_sector_t* bpb_sector, const u64 fat_table_size, u64 n) {
-	u64 root_dir_sectors = ((bpb_sector -> root_ent_cnt * 32) + (bpb_sector -> bytes_per_sector - 1));
-	u64 first_data_sector = (bpb_sector -> rsv_sectors_cnt * bpb_sector -> bytes_per_sector + fat_table_size + root_dir_sectors) / SECTOR_SIZE;
+	u64 first_data_sector = (bpb_sector -> rsv_sectors_cnt * bpb_sector -> bytes_per_sector + bpb_sector -> num_fat * fat_table_size) / SECTOR_SIZE;
 	return ((n - 2) * bpb_sector -> sectors_per_cluster * (bpb_sector -> bytes_per_sector / SECTOR_SIZE)) + first_data_sector;
 }
 
 static FatType determine_fat_type(const bpb_sector_t* bpb_sector) {
 	if ((bpb_sector -> bytes_per_sector == 0) || (bpb_sector -> sectors_per_cluster == 0)) return NOT_FAT;
 
-	u64 root_dir_sectors = ((bpb_sector -> root_ent_cnt * 32) + (bpb_sector -> bytes_per_sector - 1)) / bpb_sector -> bytes_per_sector;
+	u64 root_dir_sectors = (bpb_sector -> root_ent_cnt * 32 + bpb_sector -> bytes_per_sector) / bpb_sector -> bytes_per_sector;
 	u64 fat_size = (bpb_sector -> fat_size16 != 0) ? bpb_sector -> fat_size16 : bpb_sector -> fat_size;
 	u64 tot_sec  = (bpb_sector -> tot_sec16  != 0) ? bpb_sector -> tot_sec16  : bpb_sector -> total_sectors;
 	u64 data_sec = tot_sec - (bpb_sector -> rsv_sectors_cnt + (bpb_sector -> num_fat * fat_size) + root_dir_sectors); 
@@ -165,6 +277,39 @@ static FatType determine_fat_type(const bpb_sector_t* bpb_sector) {
 	else if (clusters_cnt < 65525) return FAT16;
 
 	return FAT32;
+}
+
+static void fat_walker(const u64 start_lba, const bpb_sector_t* bpb_sector, const u64 fat_table_size, const u64 cluster_idx) {
+	const u64 cluster_size = bpb_sector -> bytes_per_sector * bpb_sector -> sectors_per_cluster;
+	const u64 cluster_offset = first_sector_of_cluster_n(bpb_sector, fat_table_size, cluster_idx);
+	
+	// TODO: First should check if the current cluster_idx is available/valid within the File Allocation Table
+	DEBUG_LOG("Walking cluster %llu - offset %llu\n", cluster_idx, cluster_offset);
+	u8 cluster[SECTOR_SIZE * 8] = {0};
+	if (get_n_sector_at(start_lba + cluster_offset, cluster_size / SECTOR_SIZE, cluster)) {
+		WARNING_LOG("Failed to retrieve cluster %llu from qcow file.\n", cluster_idx);
+		return;
+	}
+	
+	for (u64 i = 0, j = 0; i < cluster_size; ++j, i += sizeof(fat_dir_entry_t)) {
+		const fat_dir_entry_t entry = ((fat_dir_entry_t*) cluster)[j];
+		if ((entry.name)[0] == 0) break;
+
+		if (entry.attr & FAT_ATTR_LFN) DEBUG_LOG("entry has LFN attr.\n");
+		else fat_print_dir_entry(&entry);
+		
+		if ((entry.attr & FAT_ATTR_DIRECTORY) && ((entry.name)[0] != '.')) {
+			DEBUG_LOG("Entering sub directory.\n");
+			// TODO: First should check if the cluster is available/valid within the File Allocation Table
+			const u32 entry_cluster = ((u32) entry.cluster_high << 16) | entry.cluster_low;
+			fat_walker(start_lba, bpb_sector, fat_table_size, entry_cluster);
+		} else if (entry.attr & FAT_ATTR_ARCHIVE) {
+			const u64 used_clusters = align(entry.size, bpb_sector -> bytes_per_sector) / bpb_sector -> bytes_per_sector;
+			DEBUG_LOG("entry has ARCHIVE attr, and spans for %llu clusters.\n", used_clusters);
+		}
+	}
+
+	return;
 }
 
 static void parse_fat(const partition_t partition) {
@@ -193,8 +338,8 @@ static void parse_fat(const partition_t partition) {
 		printf("fat_type: %s\n", fat_type_str[fat_type]);
 	}
 
+	const u64 fat_table_size = bpb_sector.bytes_per_sector * bpb_sector.fat_size;
 	for (u32 j = 0; j < bpb_sector.num_fat; ++j) {
-		u64 fat_table_size = bpb_sector.bytes_per_sector * bpb_sector.fat_size;
 		u8* fat_table = qcow_calloc(fat_table_size, sizeof(u8));
 		if (fat_table == NULL) {
 			WARNING_LOG("Failed to allocate fat table buffer.\n");
@@ -208,9 +353,6 @@ static void parse_fat(const partition_t partition) {
 			return;
 		}
 
-#define CLNSHUTBITMASK 0x08000000
-#define HRDERRBITMASK  0x04000000 
-
 		u32 entry_1 = ((u32*) fat_table)[1];
 		if ((entry_1 & CLNSHUTBITMASK) == 0) WARNING_LOG("Dirty Volume.\n");
 		if ((entry_1 & HRDERRBITMASK) == 0)  WARNING_LOG("I/O Disk contains faults from previous unsuccessfull unmount operation.\n");
@@ -218,13 +360,15 @@ static void parse_fat(const partition_t partition) {
 		printf(" -- FAT Table %u -- \n", j);
 		for (u64 i = 0; i < fat_table_size / 4; ++i) {
 			u32 fat_entry = ((u32*) fat_table)[i];
-			printf("Entry %llu: 0x%X\n", i, fat_entry);
+			printf("Entry %llu - %llX: 0x%X\n", i, i, fat_entry);
 			if (fat_entry == 0) break;
 		}
 		printf(" ----------------- \n");
 
 		QCOW_SAFE_FREE(fat_table);
 	}
+
+	fat_walker(partition.start_lba, &bpb_sector, fat_table_size, bpb_sector.root_cluster);
 
 	return;
 }
