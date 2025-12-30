@@ -25,10 +25,9 @@
 //       the autoclear field (bit 0).
 // TODO: Add support for crypt method: it requires checking for the crypt method used, 
 //       and also the extension header for informations.
-// TODO: Possibly check the hints for a better implementation in the pdf file
 // TODO: Could introduce a global variable QCowContext, for holding context after parse_qcow 
 //       (which should then renamed to something like init_qcow or similar)
-
+// TODO: Need to add a set of functions for making it easier to create QCow images
 // TODO: After implementing most of the aforementioned support the code needs to be tidied up.
 // TODO: Rewrite the error messages for more clarity, and also add comments to
 //       better explain how everything works.

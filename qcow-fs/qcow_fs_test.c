@@ -37,9 +37,13 @@ int main(void) {
 
 	fs_t fs = {0};
 	fs_mount(partitions[1], &fs);
+	QCOW_SAFE_FREE(partitions);
+	
+	fs_file_t file = {0};
+	fs_open(&fs, "EFI", &file);
+
 	fs_unmount(&fs);
 	
-	QCOW_SAFE_FREE(partitions);
 	
 	deinit_qcow_part();
 

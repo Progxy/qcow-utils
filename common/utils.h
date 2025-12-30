@@ -231,6 +231,16 @@ UNUSED_FUNCTION static int str_n_cmp(const char* str1, const char* str2, size_t 
 	return 0;
 }
 
+UNUSED_FUNCTION static int str_tok(const char* str, const char* delim) {
+     for (u64 i = 0, j = 0; i <= str_len(str); ++i) {
+         if (delim[j] == str[i]) {
+            if ((j + 1) == str_len(delim)) return i - j;
+            j++;
+         } else if (j > 0) i -= j, j = 0;
+    }
+    return -1;
+}
+
 #endif //_QCOW_UTILS_IMPLEMENTATION_
 
 // -------
