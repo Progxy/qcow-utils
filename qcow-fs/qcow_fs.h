@@ -28,18 +28,6 @@
 typedef enum { FAT12 = 0, FAT16 = 1, FAT32 = 2, NOT_FAT = 3 } FatType;
 const char* fat_type_str[] = { "FAT12", "FAT16", "FAT32", "NOT_FAT" };
 
-typedef enum { 
-	CLNSHUTBITMASK     = 0x08000000,
-	HRDERRBITMASK      = 0x04000000,
-	FAT_ATTR_READ_ONLY = 0x01,
-	FAT_ATTR_HIDDEN    = 0x02,
-	FAT_ATTR_SYSTEM    = 0x04,
-	FAT_ATTR_VOLUME_ID = 0x08,
-	FAT_ATTR_DIRECTORY = 0x10,
-	FAT_ATTR_ARCHIVE   = 0x20,
-	FAT_ATTR_LFN       = 0x0F,
-} QCowFsConstants;
-
 typedef struct PACKED_STRUCT {
 	u8  jmp_boot[3];
 	u64 oem_name;
@@ -66,7 +54,7 @@ typedef struct PACKED_STRUCT {
 	// FAT32 Specific Fields
 	u32 fat_size; 
 	struct {
-		u8 active_fat_cnt: 3;
+		u8 active_fat_idx: 3;
 		u8 rsv: 3; // MBZ  
 		u8 is_mirrored: 1;
 		u8 rsv_; // MBZ
@@ -118,23 +106,73 @@ STATIC_ASSERT(sizeof(bpb_sector_t) == 512,   "BPB size mismatch");
 STATIC_ASSERT(sizeof(fat_dir_entry_t) == 32, "FAT dir entry size mismatch");
 STATIC_ASSERT(sizeof(fat_lfn_entry_t) == 32, "FAT LFN entry size mismatch");
 
+#define RECENT_NODES_CNT 16
+typedef struct {
+	u64 start_lba;
+	FatType fat_type;
+	bpb_sector_t bpb_sector;
+	u32** fat_tables;
+	u8 fat_tables_cnt;
+	u64 fat_table_size;
+
+	/* fs_node_t recent_nodes[RECENT_NODES_CNT]; */
+	/* u8 recent_nodes_idx; */
+
+} fs_ctx;
+
+// For when start supporting multiple FS, the common and a union of ctxs should
+// be put here
+/* typedef struct { */
+/* 	u64 start_lba; */
+/* 	/1* FSType fs_type; *1/ */
+/* 	fs_ctx* fs_ctx; */
+/* } fs_t; */
+
+typedef fs_ctx fs_t;
+typedef fs_ctx fs_file_t;
+typedef fs_ctx fs_dir_t;
+typedef fs_ctx fs_dirent;
+typedef fs_ctx fs_stat_t;
+typedef fs_ctx fs_node_t;
+
+// API (Stil in Progress)
+int fs_mount(const partition_t partition, fs_t* fs);
+void fs_unmount(fs_t* fs);
+int fs_open(fs_t* fs, const char* path, fs_file_t* out);
+int fs_opendir(fs_t* fs, const char* path, fs_dir_t* out);
+int fs_stat(fs_t* fs, const char* path, fs_stat_t* st);
+int fs_lookup(const fs_node_t* dir, const char* name, fs_node_t* out);
+int fs_read(fs_file_t* file, void* buf, const int size);
+int fs_write(fs_file_t* file, const void* buf, const int size);
+int fs_seek(fs_file_t* file, const u64 off, const int whence);
+int fs_readdir(fs_dir_t* dir, fs_dirent* ent);
+
+typedef enum { 
+	CLNSHUTBITMASK     = 0x08000000,
+	HRDERRBITMASK      = 0x04000000,
+	FAT_SIGNATURE      = 0xAA55,
+	FAT_ATTR_READ_ONLY = 0x01,
+	FAT_ATTR_HIDDEN    = 0x02,
+	FAT_ATTR_SYSTEM    = 0x04,
+	FAT_ATTR_VOLUME_ID = 0x08,
+	FAT_ATTR_DIRECTORY = 0x10,
+	FAT_ATTR_ARCHIVE   = 0x20,
+	FAT_ATTR_LFN       = 0x0F,
+} QCowFsConstants;
+
 #include <inttypes.h>
 #include <ctype.h>
 
 static void print_ascii(const char* label, const u8* buf, u64 len) {
     printf("%-22s: \"", label);
-    for (u64 i = 0; i < len; i++) {
-        putchar(isprint(buf[i]) ? buf[i] : '.');
-    }
+    for (u64 i = 0; i < len; i++) putchar(isprint(buf[i]) ? buf[i] : '.');
     printf("\"\n");
 	return;
 }
 
 static void print_hex_bytes(const char* label, const u8* buf, u64 len) {
     printf("%-22s: ", label);
-    for (u64 i = 0; i < len; i++) {
-        printf("%02X ", buf[i]);
-    }
+    for (u64 i = 0; i < len; i++) printf("%02X ", buf[i]);
     printf("\n");
 	return;
 }
@@ -161,7 +199,7 @@ static void bpb_pretty_print(const bpb_sector_t* bpb) {
     printf("%-22s: %" PRIu32 "\n", "fat_size", bpb -> fat_size);
 
     printf("ext_flags:\n");
-    printf("  %-20s: %" PRIu8 "\n", "active_fat_cnt", bpb -> ext_flags.active_fat_cnt);
+    printf("  %-20s: %" PRIu8 "\n", "active_fat_idx", bpb -> ext_flags.active_fat_idx);
     printf("  %-20s: %" PRIu8 "\n", "is_mirrored", bpb -> ext_flags.is_mirrored);
     printf("  %-20s: 0x%02" PRIX8 "\n", "rsv (MBZ)", bpb -> ext_flags.rsv);
     printf("  %-20s: 0x%02" PRIX8 "\n", "rsv_ (MBZ)", bpb -> ext_flags.rsv_);
@@ -312,66 +350,261 @@ static void fat_walker(const u64 start_lba, const bpb_sector_t* bpb_sector, cons
 	return;
 }
 
-static void parse_fat(const partition_t partition) {
-	bpb_sector_t bpb_sector = {0};
-	if (get_sector_at(partition.start_lba, &bpb_sector)) {
-		WARNING_LOG("Failed to retrieve first sector from given qcow file.\n");
-		return;
+static bool is_contained_in(const u16 val, const u16 values_cnt, const u16* values) {
+	for (u64 i = 0; i < values_cnt; ++i) {
+		if (val == values[i]) return TRUE;
 	}
+	return FALSE;
+}
 
-	bpb_pretty_print(&bpb_sector);
+static bool is_valid_jmp_boot(const u8* jmp_boot) {
+	if (jmp_boot == NULL) return FALSE;
+	if (jmp_boot[0] == 0xEB && jmp_boot[2] == 0x90) return TRUE;
+	if (jmp_boot[0] == 0xE9) return TRUE;
+	return FALSE;
+}
 
-	FatType fat_type = determine_fat_type(&bpb_sector);
-	printf("fat_type: %s\n", fat_type_str[fat_type]);
+static int is_valid_fat_fs(const bpb_sector_t* bpb_sector) {
+	if (!is_valid_jmp_boot(bpb_sector -> jmp_boot)) {
+		WARNING_LOG("Invalid jump boot field.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	} 
 	
-	if (fat_type == NOT_FAT) {
-		bpb_sector_t backup_bpb_sector = {0};
-		const u64 backup_bpb_offset = bpb_sector.backup_bpb_sector * (bpb_sector.bytes_per_sector / SECTOR_SIZE);
-		if (get_sector_at(partition.start_lba + backup_bpb_offset, &backup_bpb_sector)) {
-			WARNING_LOG("Failed to retrieve first sector from given qcow file.\n");
-			return;
-		}
-		
-		bpb_pretty_print(&backup_bpb_sector);
-
-		fat_type = determine_fat_type(&backup_bpb_sector);
-		printf("fat_type: %s\n", fat_type_str[fat_type]);
+	const u16 bps_values[] = { 512, 1024, 2048, 4096 };
+   	if (!is_contained_in(bpb_sector -> bytes_per_sector, QCOW_ARR_SIZE(bps_values), bps_values)) {	
+		WARNING_LOG("Invalid bytes per sector field.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
 	}
 
-	const u64 fat_table_size = bpb_sector.bytes_per_sector * bpb_sector.fat_size;
-	for (u32 j = 0; j < bpb_sector.num_fat; ++j) {
-		u8* fat_table = qcow_calloc(fat_table_size, sizeof(u8));
-		if (fat_table == NULL) {
+	const u16 spc_values[] = { 1, 2, 4, 8, 16, 32, 64, 128 };
+   	if (!is_contained_in(bpb_sector -> sectors_per_cluster, QCOW_ARR_SIZE(spc_values), spc_values)) {	
+		WARNING_LOG("Invalid bytes per sector field.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+	
+	if (bpb_sector -> rsv_sectors_cnt == 0) {
+		WARNING_LOG("Invalid reserved sectors count field.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+
+	if (bpb_sector -> num_fat == 0) {
+		WARNING_LOG("Invalid num fat field.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+
+	if (bpb_sector -> root_ent_cnt != 0) {
+		WARNING_LOG("As we do not support other than FAT32, this field should be zero.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+
+	if (bpb_sector -> tot_sec16 != 0) {
+		WARNING_LOG("As we do not support other than FAT32, this field should be zero.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+
+	const u16 media_values[] = { 0xF0, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF };
+   	if (!is_contained_in(bpb_sector -> media, QCOW_ARR_SIZE(media_values), media_values)) {	
+		WARNING_LOG("Invalid media field.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+
+	if (bpb_sector -> fat_size16 != 0) {
+		WARNING_LOG("As we do not support other than FAT32, this field should be zero.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+	
+	// FAT32 Specific Checks
+	if (bpb_sector -> total_sectors == 0) {
+		WARNING_LOG("Invalid total sectors field.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+
+	if (bpb_sector -> fat_size == 0) {
+		WARNING_LOG("Invalid fat size field.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+
+	if (bpb_sector -> ext_flags.active_fat_idx != 0 && bpb_sector -> ext_flags.is_mirrored) {
+		WARNING_LOG("Active FAT index should only be set and used if mirroring is disabled.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+
+	if (bpb_sector -> ext_flags.rsv != 0 || bpb_sector -> ext_flags.rsv_ != 0) {
+		WARNING_LOG("Reserved fields must be zero.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+
+	if (bpb_sector -> maj_fs_rev || bpb_sector -> min_fs_rev) {
+		WARNING_LOG("Version must be 0x00.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+
+	if (bpb_sector -> root_cluster < 2) {
+		WARNING_LOG("The root cluster must be 2 or the first usable cluster.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+
+	if (bpb_sector -> backup_bpb_sector != 0 && bpb_sector -> backup_bpb_sector != 6) {
+		WARNING_LOG("Backup BPB Sector must be either 0 (not present) or 6 (present).\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+
+	for (unsigned int i = 0; i < 12; ++i) {
+		if ((bpb_sector -> _rsv3)[i] != 0) {
+			WARNING_LOG("Reserved field must be zero.\n");
+			return -QCOW_INVALID_BPB_SECTOR;
+		}
+	}
+
+	if (bpb_sector -> drive_num != 0x00 && bpb_sector -> drive_num != 0x80) {
+		WARNING_LOG("Drive Number must be either 0x00 or 0x80.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+	
+	if (bpb_sector -> _rsv4 != 0) {
+		WARNING_LOG("Reserved fields must be zero.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+	
+	for (unsigned int i = 0; i < 420; ++i) {
+		if ((bpb_sector -> _rsv5)[i] != 0) {
+			WARNING_LOG("Reserved field must be zero.\n");
+			return -QCOW_INVALID_BPB_SECTOR;
+		}
+	}
+
+	if (bpb_sector -> signature != FAT_SIGNATURE) {
+		WARNING_LOG("Invalid FAT Signature.\n");
+		return -QCOW_INVALID_BPB_SECTOR;
+	}
+
+	return QCOW_NO_ERROR;
+}
+
+static int parse_fat_fs(fs_ctx* fs) {
+	mem_set(&(fs -> bpb_sector), 0, sizeof(bpb_sector_t));
+	if (get_sector_at(fs -> start_lba, &(fs -> bpb_sector))) {
+		WARNING_LOG("Failed to retrieve the BPB sector from given qcow file.\n");
+		return -QCOW_IO_ERROR;
+	}
+
+	int err = is_valid_fat_fs(&(fs -> bpb_sector));
+	if (err < 0 && fs -> bpb_sector.backup_bpb_sector == 6) {
+		const u64 backup_bpb_offset = fs -> bpb_sector.backup_bpb_sector * (fs -> bpb_sector.bytes_per_sector / SECTOR_SIZE);
+		if (get_sector_at(fs -> start_lba + backup_bpb_offset, &(fs -> bpb_sector))) {
+			WARNING_LOG("Failed to retrieve backup BPB sector from given qcow file.\n");
+			return -QCOW_IO_ERROR;
+		}
+
+		int err = is_valid_fat_fs(&(fs -> bpb_sector));
+		if (err < 0) {
+			WARNING_LOG("Failed to parse FAT partition.\n");
+			return err;
+		}
+	} 
+	
+	bpb_pretty_print(&(fs -> bpb_sector));
+
+	fs -> fat_type = determine_fat_type(&(fs -> bpb_sector));
+	DEBUG_LOG("FAT Type: %s\n", fat_type_str[fs -> fat_type]);
+	if (fs -> fat_type != FAT32) {
+		WARNING_LOG("Currently we do not support FAT12/FAT16, but only FAT32.\n");
+		return -QCOW_UNSUPPORTED_FAT_FORMAT;
+	}
+
+	fs -> fat_tables_cnt = fs -> bpb_sector.num_fat;
+	fs -> fat_table_size = fs -> bpb_sector.bytes_per_sector * fs -> bpb_sector.fat_size;
+	fs -> fat_tables = qcow_calloc(fs -> fat_tables_cnt, sizeof(u32*));
+	if (fs -> fat_tables == NULL) {
+		WARNING_LOG("Failed to allocate buffer for fat tables.\n");
+		return -QCOW_IO_ERROR;
+	}
+
+	for (u32 j = 0; j < fs -> fat_tables_cnt; ++j) {
+		(fs -> fat_tables)[j] = qcow_calloc(fs -> fat_table_size, sizeof(u8));
+		if ((fs -> fat_tables)[j] == NULL) {
+			for (u8 z = 0; z < j; ++z) QCOW_SAFE_FREE((fs -> fat_tables)[z]);
 			WARNING_LOG("Failed to allocate fat table buffer.\n");
-			return;
+			return -QCOW_IO_ERROR;
 		}
 
-		const u64 fat_region_offset = bpb_sector.rsv_sectors_cnt * (bpb_sector.bytes_per_sector / SECTOR_SIZE) + (j * fat_table_size / SECTOR_SIZE);
-		if (get_n_sector_at(partition.start_lba + fat_region_offset, fat_table_size / SECTOR_SIZE, fat_table)) {
-			QCOW_SAFE_FREE(fat_table);
+		const u64 fat_region_offset = fs -> bpb_sector.rsv_sectors_cnt * (fs -> bpb_sector.bytes_per_sector / SECTOR_SIZE) + (j * fs -> fat_table_size / SECTOR_SIZE);
+		if (get_n_sector_at(fs -> start_lba + fat_region_offset, fs -> fat_table_size / SECTOR_SIZE, fs -> fat_tables + j)) {
+			for (u8 z = 0; z <= j; ++z) QCOW_SAFE_FREE((fs -> fat_tables)[z]);
 			WARNING_LOG("Failed to retrieve first sector from given qcow file.\n");
-			return;
+			return -QCOW_IO_ERROR;
 		}
 
-		u32 entry_1 = ((u32*) fat_table)[1];
+		u32 entry_1 = (fs -> fat_tables)[j][1];
 		if ((entry_1 & CLNSHUTBITMASK) == 0) WARNING_LOG("Dirty Volume.\n");
 		if ((entry_1 & HRDERRBITMASK) == 0)  WARNING_LOG("I/O Disk contains faults from previous unsuccessfull unmount operation.\n");
-
-		printf(" -- FAT Table %u -- \n", j);
-		for (u64 i = 0; i < fat_table_size / 4; ++i) {
-			u32 fat_entry = ((u32*) fat_table)[i];
-			printf("Entry %llu - %llX: 0x%X\n", i, i, fat_entry);
-			if (fat_entry == 0) break;
-		}
-		printf(" ----------------- \n");
-
-		QCOW_SAFE_FREE(fat_table);
 	}
 
-	fat_walker(partition.start_lba, &bpb_sector, fat_table_size, bpb_sector.root_cluster);
-
-	return;
+	return QCOW_NO_ERROR;
 }
+
+// Exposed API Functions
+int fs_mount(const partition_t partition, fs_t* fs) {
+	fs -> start_lba = partition.start_lba;
+
+	int err = parse_fat_fs(fs);
+	if (err == 0) return QCOW_NO_ERROR;
+	else if (-err == QCOW_IO_ERROR) {
+		WARNING_LOG("Failed to parse the FAT partition.\n");
+		return err;
+	} 
+	
+	TODO("try parsing other fs.");
+	return -QCOW_TODO;
+}
+
+void fs_unmount(fs_t* fs) {
+	for (u8 i = 0; i < fs -> fat_tables_cnt; ++i) QCOW_SAFE_FREE((fs -> fat_tables)[i]);
+	QCOW_SAFE_FREE(fs -> fat_tables);
+	TODO("Implement me!");
+	return; 
+}
+
+int fs_open(fs_t* fs, const char* path, fs_file_t* out) {
+	TODO("Implement me!");
+	return -QCOW_TODO;
+}
+
+int fs_opendir(fs_t* fs, const char* path, fs_dir_t* out) {
+	TODO("Implement me!");
+	return -QCOW_TODO;
+}
+
+int fs_stat(fs_t* fs, const char* path, fs_stat_t* st) {
+	TODO("Implement me!");
+	return -QCOW_TODO;
+}
+
+int fs_lookup(const fs_node_t* dir, const char* name, fs_node_t* out) {
+	TODO("Implement me!");
+	return -QCOW_TODO;
+}
+
+int fs_read(fs_file_t* file, void* buf, const int size) {
+	TODO("Implement me!");
+	return -QCOW_TODO;
+}
+
+int fs_write(fs_file_t* file, const void* buf, const int size) {
+	TODO("Implement me!");
+	return -QCOW_TODO;
+}
+
+int fs_seek(fs_file_t* file, const u64 off, const int whence) {
+	TODO("Implement me!");
+	return -QCOW_TODO;
+}
+
+int fs_readdir(fs_dir_t* dir, fs_dirent* ent) {
+	TODO("Implement me!");
+	return -QCOW_TODO;
+}
+
 
 #endif //_QCOW_FS_H_
 
