@@ -25,25 +25,34 @@ int main(void) {
 		return 1;
 	}
 
+	int err = 0;
 	partition_t* partitions = NULL;
 	unsigned int partitions_cnt = 0;
-	if (parse_partitions(&partitions, &partitions_cnt)) {
-		WARNING_LOG("Failed to parse the partitions.\n");
+	if ((err = parse_partitions(&partitions, &partitions_cnt)) < 0) {
+		WARNING_LOG("Failed to parse the partitions, because: %s.\n", qcow_errors_str[-err]);
 		deinit_qcow_part();
 		return 1;
 	}
 	
+	const partition_t fat_partition = partitions[1];
 	for (unsigned int i = 0; i < partitions_cnt; ++i) print_part_info(partitions[i]);
+	QCOW_SAFE_FREE(partitions);
 
 	fs_t fs = {0};
-	fs_mount(partitions[1], &fs);
-	QCOW_SAFE_FREE(partitions);
+	if ((err = fs_mount(fat_partition, &fs)) < 0) {
+		WARNING_LOG("Failed to mount partition, because: %s\n", qcow_errors_str[-err]);
+		return 1;
+	}
 	
 	fs_file_t file = {0};
-	fs_open(&fs, "EFI", &file);
+	if ((err = fs_open(&fs, "EFI/BOOT", &file)) < 0) {
+		WARNING_LOG("Failed to open file, because: %s\n", qcow_errors_str[-err]);
+		return 1;
+	}
 
+	print_file_info(&file);
+		
 	fs_unmount(&fs);
-	
 	
 	deinit_qcow_part();
 

@@ -241,6 +241,32 @@ UNUSED_FUNCTION static int str_tok(const char* str, const char* delim) {
     return -1;
 }
 
+UNUSED_FUNCTION static inline u64 clamp(const u64 val, const u64 min, const u64 max) {
+	if      (val <= min) return min;
+	else if (val >= max) return max;
+	return val;
+}
+
+UNUSED_FUNCTION static inline bool is_whitespace(char c) {
+	static const char whitespace_chars[] = { ' ', '\t', '\n', '\v', '\f', '\r' };
+	for (unsigned int i = 0; i < QCOW_ARR_SIZE(whitespace_chars); ++i) {
+		if (c == whitespace_chars[i]) return TRUE;
+	}
+	return FALSE;
+}
+
+UNUSED_FUNCTION static void trim_str(char* str) {
+	char* orig_str = str;
+	while (is_whitespace(*str)) str++;
+	char* str_start = str;
+	while (!is_whitespace(*str)) str++;
+	char* str_last = str;
+	while(*str++ != '\0');
+	mem_cpy(orig_str, str_start, str_last - str_start);
+	orig_str[str_last - str_start] = '\0';
+	return;
+}
+
 #endif //_QCOW_UTILS_IMPLEMENTATION_
 
 // -------
@@ -277,6 +303,10 @@ typedef enum PACKED_STRUCT QCowErrors {
 	QCOW_INVALID_CRC_CHECKSUM,
 	QCOW_INVALID_BPB_SECTOR,
 	QCOW_UNSUPPORTED_FAT_FORMAT,
+	QCOW_NOT_A_DIRECTORY,
+	QCOW_FILE_NOT_FOUND,
+	QCOW_CORRUPTED_DIRECTORY,
+	QCOW_NOT_A_FILE,
 	QCOW_TODO 
 } QCowErrors;
 
@@ -311,6 +341,10 @@ static const char* qcow_errors_str[] = {
 	"QCOW_INVALID_CRC_CHECKSUM",
 	"QCOW_INVALID_BPB_SECTOR",	
 	"QCOW_UNSUPPORTED_FAT_FORMAT",
+	"QCOW_NOT_A_DIRECTORY",
+	"QCOW_FILE_NOT_FOUND",
+	"QCOW_CORRUPTED_DIRECTORY",
+	"QCOW_NOT_A_FILE",
     "QCOW_TODO" 
 };
 

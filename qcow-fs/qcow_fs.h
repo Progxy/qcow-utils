@@ -42,6 +42,12 @@ typedef enum {
 	FAT_ATTR_DIRECTORY = 0x10,
 	FAT_ATTR_ARCHIVE   = 0x20,
 	FAT_ATTR_LFN       = 0x0F,
+	FAT_DIR_DELETED    = 0xE5,
+	FAT_EMPTY_DIR      = 0x00,
+	FAT_RSV_CLUSTERS   = 0x0FFFFFF6,
+	FAT_END_OF_CHAIN   = 0x0FFFFFF8,
+	FAT_BAD_CLUSTER    = 0x0FFFFFF7,
+	FAT_FREE_CLUSTER   = 0x00
 } QCowFsConstants;
 
 typedef struct PACKED_STRUCT {
@@ -122,28 +128,6 @@ STATIC_ASSERT(sizeof(bpb_sector_t) == 512,   "BPB size mismatch");
 STATIC_ASSERT(sizeof(fat_dir_entry_t) == 32, "FAT dir entry size mismatch");
 STATIC_ASSERT(sizeof(fat_lfn_entry_t) == 32, "FAT LFN entry size mismatch");
 
-#define RECENT_NODES_CNT 16
-typedef struct {
-	u64 start_lba;
-	FatType fat_type;
-	bpb_sector_t bpb_sector;
-	u32** fat_tables;
-	u8 fat_tables_cnt;
-	u64 fat_table_size;
-
-	/* fs_node_t recent_nodes[RECENT_NODES_CNT]; */
-	/* u8 recent_nodes_idx; */
-
-} fs_ctx;
-
-// For when start supporting multiple FS, the common and a union of ctxs should
-// be put here
-/* typedef struct { */
-/* 	u64 start_lba; */
-/* 	/1* FSType fs_type; *1/ */
-/* 	fs_ctx* fs_ctx; */
-/* } fs_t; */
-
 typedef struct {
 	u16 year;
 	u8 month;
@@ -153,11 +137,6 @@ typedef struct {
 	u8 secs;
 } fs_time_t;
 
-typedef fs_ctx fs_t;
-typedef fs_ctx fs_dir_t;
-typedef fs_ctx fs_dirent;
-typedef fs_ctx fs_stat_t;
-
 typedef struct fs_node_t {
 	u64 size;
 	u32 cluster;
@@ -166,8 +145,14 @@ typedef struct fs_node_t {
 	fs_time_t creation_time;
 	fs_time_t access_time;
 	fs_time_t modification_time;
-	struct fs_node_t* next_node;
-	struct fs_node_t* prev_node;
+	
+	// TODO: 
+	// This are fields that could be used for caching, but still need to
+	// find the balance between space cost and time cost (as the latter goes
+	// down as the first goes up)
+	
+	/* struct fs_node_t* next_node; */
+	/* struct fs_node_t* prev_node; */
 } fs_node_t;
 
 typedef struct {
@@ -177,6 +162,46 @@ typedef struct {
 	fs_node_t node;
 	char name[MAX_FAT_NAME];
 } fs_file_t;
+
+typedef struct {
+	u64 size;
+	u8  attributes;
+	fs_node_t node;
+	char name[MAX_FAT_NAME];
+	fs_node_t* entries;
+	u64 entries_cnt;
+} fs_dir_t;
+
+typedef fs_file_t fs_dirent;
+typedef fs_file_t fs_stat_t;
+
+#define RECENT_NODES_CNT 16
+typedef struct {
+	u64 start_lba;
+	FatType fat_type;
+	bpb_sector_t bpb_sector;
+	u32** fat_tables;
+	u8 fat_tables_cnt;
+	u64 fat_table_size;
+	u64 max_valid_cluster;
+	u8* lru_cluster;
+	u64 cluster_size;
+
+	fs_node_t root;
+	/* fs_node_t recent_nodes[RECENT_NODES_CNT]; */
+	/* u8 recent_nodes_idx; */
+
+} fs_ctx;
+
+typedef fs_ctx fs_t;
+
+// For when start supporting multiple FS, the common and a union of ctxs should
+// be put here
+/* typedef struct { */
+/* 	u64 start_lba; */
+/* 	/1* FSType fs_type; *1/ */
+/* 	fs_ctx* fs_ctx; */
+/* } fs_t; */
 
 // API (Stil in Progress)
 int fs_mount(const partition_t partition, fs_t* fs);
@@ -271,17 +296,6 @@ static void print_attr(const u8 attr) {
 }
 
 static void fat_print_dir_entry(const fat_dir_entry_t* e) {
-    char name[9] = {0};
-    char ext[4] = {0};
-
-    /* Copy and trim name */
-    for (int i = 0; i < 8; i++) name[i] = (e -> name[i] == ' ') ? '\0' : e -> name[i];
-    name[8] = '\0';
-
-    /* Copy and trim extension */
-    for (int i = 0; i < 3; i++) ext[i] = (e -> ext[i] == ' ') ? '\0' : e -> ext[i];
-    ext[3] = '\0';
-
     /* Combine cluster */
     u32 first_cluster = (((u32) e -> cluster_high) << 16) | e -> cluster_low;
 
@@ -289,8 +303,8 @@ static void fat_print_dir_entry(const fat_dir_entry_t* e) {
     printf("FAT DIR ENTRY\n");
     printf("-------------\n");
 
-    if (ext[0]) printf("Name        : '%s.%s'\n", name, ext);
-    else        printf("Name        : '%s'\n", name);
+    if ((e -> ext)[0]) printf("Name        : '%s.%s'\n", e -> name, e -> ext);
+    else        printf("Name        : '%s'\n", e -> name);
 
     print_attr(e -> attr);
     printf("\n");
@@ -328,24 +342,49 @@ static void fat_print_dir_entry(const fat_dir_entry_t* e) {
 	return;
 }
 
-static inline u64 first_sector_of_cluster_n(const fs_t* fs, u64 n) {
-	u64 first_data_sector = (fs -> bpb_sector.rsv_sectors_cnt * fs -> bpb_sector.bytes_per_sector + fs -> bpb_sector.num_fat * fs -> fat_table_size) / SECTOR_SIZE;
-	return ((n - 2) * fs -> bpb_sector.sectors_per_cluster * (fs -> bpb_sector.bytes_per_sector / SECTOR_SIZE)) + first_data_sector;
+static void print_file_info(fs_file_t* file) {
+	printf(" -- File Info -- \n");
+	printf("size: %llu\n", file -> size);
+	printf("offset: %llu\n", file -> offset);
+	printf("attributes: ");
+	print_attr(file -> attributes);
+	printf("\n");
+	/* fs_node_t node; */
+	printf("name: '%s'\n", file -> name);
+	printf("----------------\n");
+	return;
 }
 
-static FatType determine_fat_type(const bpb_sector_t* bpb_sector) {
+static inline u64 first_sector_of_cluster_n(const fs_t* fs, u64 n) {
+	u64 first_data_sector = (fs -> bpb_sector.rsv_sectors_cnt * fs -> bpb_sector.bytes_per_sector + fs -> bpb_sector.num_fat * fs -> fat_table_size) / SECTOR_SIZE;
+	return ((n - 2) * fs -> cluster_size / SECTOR_SIZE) + first_data_sector;
+}
+
+static FatType determine_fat_type(fs_t* fs) {
+	const bpb_sector_t* bpb_sector = &(fs -> bpb_sector);
 	if ((bpb_sector -> bytes_per_sector == 0) || (bpb_sector -> sectors_per_cluster == 0)) return NOT_FAT;
 
 	u64 root_dir_sectors = (bpb_sector -> root_ent_cnt * 32 + bpb_sector -> bytes_per_sector) / bpb_sector -> bytes_per_sector;
 	u64 fat_size = (bpb_sector -> fat_size16 != 0) ? bpb_sector -> fat_size16 : bpb_sector -> fat_size;
 	u64 tot_sec  = (bpb_sector -> tot_sec16  != 0) ? bpb_sector -> tot_sec16  : bpb_sector -> total_sectors;
 	u64 data_sec = tot_sec - (bpb_sector -> rsv_sectors_cnt + (bpb_sector -> num_fat * fat_size) + root_dir_sectors); 
-	u64 clusters_cnt = data_sec / bpb_sector -> sectors_per_cluster; 	
+	fs -> max_valid_cluster = data_sec / bpb_sector -> sectors_per_cluster; 	
 	
-	if (clusters_cnt < 4085)       return FAT12;
-	else if (clusters_cnt < 65525) return FAT16;
+	if (fs -> max_valid_cluster < 4085)       return FAT12;
+	else if (fs -> max_valid_cluster < 65525) return FAT16;
 
 	return FAT32;
+}
+
+static fs_time_t fat_time_to_fs_time(const u16 date, const u16 time) {
+	fs_time_t fs_time = {0};
+	fs_time.year  = ((date >> 9) & 0x7F) + 1980;
+	fs_time.month = clamp((date >> 5) & 0x0F, 1, 12);
+	fs_time.day   = clamp(date & 0x1F, 1, 31);
+	fs_time.hours = clamp((time >> 11) & 0x1F, 0, 23);
+	fs_time.mins  = clamp((time >> 5) & 0x3F, 0, 59);
+	fs_time.secs  = clamp((time & 0x1F) * 2, 0, 58);
+	return fs_time;
 }
 
 /* static void fat_walker(const u64 start_lba, const bpb_sector_t* bpb_sector, const u64 fat_table_size, const u64 cluster_idx) { */
@@ -395,7 +434,8 @@ static bool is_valid_jmp_boot(const u8* jmp_boot) {
 	return FALSE;
 }
 
-static int is_valid_fat_fs(const bpb_sector_t* bpb_sector) {
+static int is_valid_fat_fs(fs_ctx* fs) {
+	const bpb_sector_t* bpb_sector = &(fs -> bpb_sector);
 	if (!is_valid_jmp_boot(bpb_sector -> jmp_boot)) {
 		WARNING_LOG("Invalid jump boot field.\n");
 		return -QCOW_INVALID_BPB_SECTOR;
@@ -495,7 +535,7 @@ static int parse_fat_fs(fs_ctx* fs) {
 		return -QCOW_IO_ERROR;
 	}
 	
-	int err = is_valid_fat_fs(&(fs -> bpb_sector));
+	int err = is_valid_fat_fs(fs);
 	if (err < 0 && fs -> bpb_sector.backup_bpb_sector == 6) {
 		const u64 backup_bpb_offset = fs -> bpb_sector.backup_bpb_sector * (fs -> bpb_sector.bytes_per_sector / SECTOR_SIZE);
 		if (get_sector_at(fs -> start_lba + backup_bpb_offset, &(fs -> bpb_sector))) {
@@ -503,7 +543,7 @@ static int parse_fat_fs(fs_ctx* fs) {
 			return -QCOW_IO_ERROR;
 		}
 
-		int err = is_valid_fat_fs(&(fs -> bpb_sector));
+		int err = is_valid_fat_fs(fs);
 		if (err < 0) {
 			WARNING_LOG("Failed to parse FAT partition.\n");
 			return err;
@@ -512,7 +552,7 @@ static int parse_fat_fs(fs_ctx* fs) {
 	
 	bpb_pretty_print(&(fs -> bpb_sector));
 
-	fs -> fat_type = determine_fat_type(&(fs -> bpb_sector));
+	fs -> fat_type = determine_fat_type(fs);
 	DEBUG_LOG("FAT Type: %s\n", fat_type_str[fs -> fat_type]);
 	if (fs -> fat_type != FAT32) {
 		WARNING_LOG("Currently we do not support FAT12/FAT16, but only FAT32.\n");
@@ -548,12 +588,19 @@ static int parse_fat_fs(fs_ctx* fs) {
 		if ((entry_1 & HRDERRBITMASK) == 0)  WARNING_LOG("I/O Disk contains faults from previous unsuccessfull unmount operation.\n");
 	}
 
-	fs -> root.size    = 0;
-	fs -> root.cluster = fs -> bpb_sector.root_cluster;
-	fs -> attributes   = FAT_ATTR_VOLUME_ID;
-	(fs -> name)[0]    = '/';
-	fs -> prev_node    = NULL;
-	fs -> next_node    = NULL;
+	fs -> root.size       = 0;
+	fs -> root.cluster    = fs -> bpb_sector.root_cluster;
+	fs -> root.attributes = FAT_ATTR_VOLUME_ID | FAT_ATTR_DIRECTORY;
+	(fs -> root.name)[0]  = '/';
+
+	fs -> cluster_size = fs -> bpb_sector.sectors_per_cluster * fs -> bpb_sector.bytes_per_sector;
+	fs -> lru_cluster = qcow_calloc(fs -> cluster_size, sizeof(u8));
+	if (fs -> lru_cluster == NULL) {
+		for (u8 i = 0; i < fs -> fat_tables_cnt; ++i) QCOW_SAFE_FREE((fs -> fat_tables)[i]);
+		QCOW_SAFE_FREE(fs -> fat_tables);
+		WARNING_LOG("Failed to allocate cluster.\n");
+		return -QCOW_IO_ERROR;
+	}
 
 	return QCOW_NO_ERROR;
 }
@@ -578,6 +625,7 @@ int fs_mount(const partition_t partition, fs_t* fs) {
 void fs_unmount(fs_t* fs) {
 	for (u8 i = 0; i < fs -> fat_tables_cnt; ++i) QCOW_SAFE_FREE((fs -> fat_tables)[i]);
 	QCOW_SAFE_FREE(fs -> fat_tables);
+	QCOW_SAFE_FREE(fs -> lru_cluster);
 	DEBUG_LOG("Partition successfully unmounted.\n");
 	return; 
 }
@@ -585,35 +633,47 @@ void fs_unmount(fs_t* fs) {
 int fs_open(fs_t* fs, const char* path, fs_file_t* file) {
 	u64 path_len = str_len(path);
 	char* sub_path = qcow_calloc(path_len, sizeof(char));
-	if (sub_path == NULL) return -QCOW_IO_ERROR;
+	if (sub_path == NULL) {
+		WARNING_LOG("Failed to allocate buffer for sub_path.\n");
+		return -QCOW_IO_ERROR;
+	}
 
+	// TODO: Should be changed with its correct representation which is the cwd?
 	fs_node_t node = fs -> root;
 
 	int err = 0;
-	unsigned int prev_tok = 0;
-	for (unsigned int i = 0; i < path_len; ++i) {
-		int tok = str_tok(path + i, "/");
+	for (unsigned int prev_tok = 0; prev_tok < path_len;) {
+		int tok = str_tok(path + prev_tok, "/");
 		if (tok == -1) tok = path_len;
-		mem_cpy(sub_path, path + i, tok - prev_tok);
+		else tok += prev_tok;
+		mem_cpy(sub_path, path + prev_tok, tok - prev_tok);
+		DEBUG_LOG("looking up sub_path: '%s' from path: '%s'\n", sub_path, path);
 		if ((err = fs_lookup(fs, &node, sub_path, &node)) < 0) {
 			QCOW_SAFE_FREE(sub_path);
 			return err;
 		}
-		prev_tok = tok;
+		prev_tok = tok + 1;
+		mem_set(sub_path, 0, path_len);
 	}
 	
 	QCOW_SAFE_FREE(sub_path);
 	
+	if (node.attributes & FAT_ATTR_DIRECTORY) {
+		WARNING_LOG("The given path resolves into a directory.\n");
+		return -QCOW_NOT_A_FILE;
+	}
+
 	file -> node = node;
 	file -> size = node.size;
 	file -> offset = 0;
 	file -> attributes = node.attributes;
+	mem_set(file -> name, 0, MAX_FAT_NAME);
 	mem_cpy(file -> name, node.name, MAX_FAT_NAME);
 		
 	return QCOW_NO_ERROR;
 }
 
-int fs_opendir(fs_t* fs, const char* path, fs_dir_t* out) {
+int fs_opendir(fs_t* fs, const char* path, fs_dir_t* dir) {
 	TODO("Implement me!");
 	return -QCOW_TODO;
 }
@@ -623,38 +683,84 @@ int fs_stat(fs_t* fs, const char* path, fs_stat_t* st) {
 	return -QCOW_TODO;
 }
 
-int fs_lookup(fs_t* fs, const fs_node_t* dir, const char* name, fs_node_t* out) {
-	const u64 cluster_size = fs -> bpb_sector.bytes_per_sector * bpb_sector -> sectors_per_cluster;
-	const u64 cluster_offset = first_sector_of_cluster_n(fs, dir -> cluster);
-	
-	// TODO: First should check if the current cluster_idx is available/valid within the File Allocation Table
-	DEBUG_LOG("Walking cluster %llu - offset %llu\n", dir -> cluster, cluster_offset);
-	u8 cluster[SECTOR_SIZE * 8] = {0};
-	if (get_n_sector_at(fs -> start_lba + cluster_offset, cluster_size / SECTOR_SIZE, cluster)) {
-		WARNING_LOG("Failed to retrieve cluster %llu from qcow file.\n", dir -> cluster);
-		return;
+int fs_lookup(fs_t* fs, const fs_node_t* dir, const char* name, fs_node_t* node) {
+	if (!(dir -> attributes & FAT_ATTR_DIRECTORY)) {
+		WARNING_LOG("The given node object is not a directory.\n");
+		return -QCOW_NOT_A_DIRECTORY;
 	}
-	
-	for (u64 i = 0, j = 0; i < cluster_size; ++j, i += sizeof(fat_dir_entry_t)) {
-		const fat_dir_entry_t entry = ((fat_dir_entry_t*) cluster)[j];
-		if ((entry.name)[0] == 0) break;
 
-		if (entry.attr & FAT_ATTR_LFN) DEBUG_LOG("entry has LFN attr.\n");
-		else fat_print_dir_entry(&entry);
-		
-		if ((entry.attr & FAT_ATTR_DIRECTORY) && ((entry.name)[0] != '.')) {
-			DEBUG_LOG("Entering sub directory.\n");
-			// TODO: First should check if the cluster is available/valid within the File Allocation Table
-			const u32 entry_cluster = ((u32) entry.cluster_high << 16) | entry.cluster_low;
-			fat_walker(start_lba, bpb_sector, fat_table_size, entry_cluster);
-		} else if (entry.attr & FAT_ATTR_ARCHIVE) {
-			const u64 used_clusters = align(entry.size, bpb_sector -> bytes_per_sector) / bpb_sector -> bytes_per_sector;
-			DEBUG_LOG("entry has ARCHIVE attr, and spans for %llu clusters.\n", used_clusters);
+	u64 cluster_n = dir -> cluster;
+	do {
+		const u64 cluster_offset = first_sector_of_cluster_n(fs, cluster_n);
+		DEBUG_LOG("Walking cluster %llu - offset %llu\n", cluster_n, cluster_offset);
+		if (get_n_sector_at(fs -> start_lba + cluster_offset, fs -> cluster_size / SECTOR_SIZE, fs -> lru_cluster)) {
+			WARNING_LOG("Failed to retrieve cluster %llu from qcow file.\n", cluster_n);
+			return -QCOW_IO_ERROR;
 		}
-	}
 
-	TODO("Implement me!");
-	return -QCOW_TODO;
+		/* u8 entry_name[MAX_FAT_NAME] = {0}; */
+		/* u64 entry_name_size = 0; */
+
+		for (u64 i = 0, j = 0; i < fs -> cluster_size; ++j, i += sizeof(fat_dir_entry_t)) {
+			fat_dir_entry_t entry = ((fat_dir_entry_t*) fs -> lru_cluster)[j];
+			if ((entry.name)[0] == FAT_EMPTY_DIR) {
+				DEBUG_LOG("Found first empty dir, and therefore the end of this directory's content.\n");
+				return -QCOW_FILE_NOT_FOUND;
+			}
+
+			if ((entry.name)[0] == FAT_DIR_DELETED) {
+				DEBUG_LOG("This directory/file has been deleted.\n");
+				continue;
+			} else if (entry.attr & FAT_ATTR_LFN) {
+				DEBUG_LOG("entry has LFN attr.\n");
+				// update_lfn_entry_name(entry, entry_name, entry_name_size);
+				continue;
+			} else if (entry.attr & FAT_ATTR_VOLUME_ID) {
+				DEBUG_LOG("Disk partition must be corrupted as volume label is not accessible from here.\n");
+				return -QCOW_CORRUPTED_DIRECTORY;
+			}
+			
+			trim_str((char*) entry.name);
+			if (is_whitespace(entry.ext[0])) (entry.ext)[0] = '\0';
+			
+			const u64 entry_name_len = str_len((const char*) entry.name);
+			if (mem_n_cmp(entry.name, name, MIN(entry_name_len, str_len(name))) == 0) {
+				fat_print_dir_entry(&entry);
+				node -> size = entry.size;
+				node -> attributes = entry.attr;
+				node -> cluster = ((u32) entry.cluster_high << 16) | entry.cluster_low;
+				
+				mem_set(node -> name, 0, MAX_FAT_NAME);
+				mem_cpy(node -> name, entry.name, entry_name_len);
+				if (!(entry.attr & FAT_ATTR_DIRECTORY) && entry.ext[0]) {
+					(node -> name)[entry_name_len] = '.';
+					mem_cpy(node -> name + entry_name_len + 1, entry.ext, str_len((const char*) entry.ext));
+				}
+
+				node -> creation_time     = fat_time_to_fs_time(entry.cdate, entry.ctime);
+				node -> access_time       = fat_time_to_fs_time(entry.adate, 0);
+				node -> modification_time = fat_time_to_fs_time(entry.mdate, entry.mtime);
+				
+				return QCOW_NO_ERROR;
+			}
+			
+			// mem_set(name, 0, MAX_FAT_NAME);
+			// name_size = 0;
+		}
+
+		cluster_n = (fs -> fat_tables[0])[cluster_n] & 0x0FFFFFFF;
+		if (cluster_n >= FAT_END_OF_CHAIN) {
+			WARNING_LOG("Reached end of chain of the FAT table.\n");
+			return -QCOW_FILE_NOT_FOUND;
+		}
+
+		if (cluster_n == FAT_BAD_CLUSTER || cluster_n == FAT_FREE_CLUSTER || ((cluster_n > fs -> max_valid_cluster) && (cluster_n <= FAT_RSV_CLUSTERS))) {
+			WARNING_LOG("Corrupted directory.\n");
+			return -QCOW_CORRUPTED_DIRECTORY;
+		}
+	} while (TRUE);
+
+	return -QCOW_FILE_NOT_FOUND;
 }
 
 int fs_read(fs_file_t* file, void* buf, const int size) {
