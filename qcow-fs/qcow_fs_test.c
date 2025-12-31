@@ -44,13 +44,14 @@ int main(void) {
 		return 1;
 	}
 	
-	fs_file_t file = {0};
-	if ((err = fs_open(&fs, "EFI/BOOT", &file)) < 0) {
-		WARNING_LOG("Failed to open file, because: %s\n", qcow_errors_str[-err]);
+	/* fs_file_t file = {0}; */
+	fs_dir_t dir = {0};
+	if ((err = fs_opendir(&fs, "EFI/BOOT", &dir)) < 0) {
+		WARNING_LOG("Failed to open dir, because: %s\n", qcow_errors_str[-err]);
 		return 1;
 	}
 
-	print_file_info(&file);
+	print_dir_info(&dir);
 		
 	fs_unmount(&fs);
 	

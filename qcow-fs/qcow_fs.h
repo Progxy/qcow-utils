@@ -168,12 +168,22 @@ typedef struct {
 	u8  attributes;
 	fs_node_t node;
 	char name[MAX_FAT_NAME];
-	fs_node_t* entries;
-	u64 entries_cnt;
+	/* fs_node_t* entries; */
+	/* u64 entries_cnt; */
 } fs_dir_t;
 
-typedef fs_file_t fs_dirent;
-typedef fs_file_t fs_stat_t;
+typedef enum { DIRECTORY = 0x01, FILE = 0x02, READONLY = 0x04 } FileAttr;
+
+typedef struct {
+	fs_dir_t 
+	FileAttr file_attr;
+	char name[MAX_FAT_NAME];
+} fs_dirent;
+
+typedef union {
+	fs_file_t file;
+	fs_dir_t  dir;
+} fs_stat_t;
 
 #define RECENT_NODES_CNT 16
 typedef struct {
@@ -351,6 +361,17 @@ static void print_file_info(fs_file_t* file) {
 	printf("\n");
 	/* fs_node_t node; */
 	printf("name: '%s'\n", file -> name);
+	printf("----------------\n");
+	return;
+}
+
+static void print_dir_info(fs_dir_t* dir) {
+	printf(" -- Dir Info -- \n");
+	printf("size: %llu\n", dir -> size);
+	printf("attributes: ");
+	print_attr(dir -> attributes);
+	printf("\n");
+	printf("name: '%s'\n", dir -> name);
 	printf("----------------\n");
 	return;
 }
@@ -630,59 +651,6 @@ void fs_unmount(fs_t* fs) {
 	return; 
 }
 
-int fs_open(fs_t* fs, const char* path, fs_file_t* file) {
-	u64 path_len = str_len(path);
-	char* sub_path = qcow_calloc(path_len, sizeof(char));
-	if (sub_path == NULL) {
-		WARNING_LOG("Failed to allocate buffer for sub_path.\n");
-		return -QCOW_IO_ERROR;
-	}
-
-	// TODO: Should be changed with its correct representation which is the cwd?
-	fs_node_t node = fs -> root;
-
-	int err = 0;
-	for (unsigned int prev_tok = 0; prev_tok < path_len;) {
-		int tok = str_tok(path + prev_tok, "/");
-		if (tok == -1) tok = path_len;
-		else tok += prev_tok;
-		mem_cpy(sub_path, path + prev_tok, tok - prev_tok);
-		DEBUG_LOG("looking up sub_path: '%s' from path: '%s'\n", sub_path, path);
-		if ((err = fs_lookup(fs, &node, sub_path, &node)) < 0) {
-			QCOW_SAFE_FREE(sub_path);
-			return err;
-		}
-		prev_tok = tok + 1;
-		mem_set(sub_path, 0, path_len);
-	}
-	
-	QCOW_SAFE_FREE(sub_path);
-	
-	if (node.attributes & FAT_ATTR_DIRECTORY) {
-		WARNING_LOG("The given path resolves into a directory.\n");
-		return -QCOW_NOT_A_FILE;
-	}
-
-	file -> node = node;
-	file -> size = node.size;
-	file -> offset = 0;
-	file -> attributes = node.attributes;
-	mem_set(file -> name, 0, MAX_FAT_NAME);
-	mem_cpy(file -> name, node.name, MAX_FAT_NAME);
-		
-	return QCOW_NO_ERROR;
-}
-
-int fs_opendir(fs_t* fs, const char* path, fs_dir_t* dir) {
-	TODO("Implement me!");
-	return -QCOW_TODO;
-}
-
-int fs_stat(fs_t* fs, const char* path, fs_stat_t* st) {
-	TODO("Implement me!");
-	return -QCOW_TODO;
-}
-
 int fs_lookup(fs_t* fs, const fs_node_t* dir, const char* name, fs_node_t* node) {
 	if (!(dir -> attributes & FAT_ATTR_DIRECTORY)) {
 		WARNING_LOG("The given node object is not a directory.\n");
@@ -763,6 +731,96 @@ int fs_lookup(fs_t* fs, const fs_node_t* dir, const char* name, fs_node_t* node)
 	return -QCOW_FILE_NOT_FOUND;
 }
 
+int fs_open(fs_t* fs, const char* path, fs_file_t* file) {
+	u64 path_len = str_len(path);
+	char* sub_path = qcow_calloc(path_len, sizeof(char));
+	if (sub_path == NULL) {
+		WARNING_LOG("Failed to allocate buffer for sub_path.\n");
+		return -QCOW_IO_ERROR;
+	}
+
+	// TODO: Should be changed with its correct representation which is the cwd?
+	fs_node_t node = fs -> root;
+
+	int err = 0;
+	for (unsigned int prev_tok = 0; prev_tok < path_len;) {
+		int tok = str_tok(path + prev_tok, "/");
+		if (tok == -1) tok = path_len;
+		else tok += prev_tok;
+		mem_cpy(sub_path, path + prev_tok, tok - prev_tok);
+		DEBUG_LOG("looking up sub_path: '%s' from path: '%s'\n", sub_path, path);
+		if ((err = fs_lookup(fs, &node, sub_path, &node)) < 0) {
+			QCOW_SAFE_FREE(sub_path);
+			return err;
+		}
+		prev_tok = tok + 1;
+		mem_set(sub_path, 0, path_len);
+	}
+	
+	QCOW_SAFE_FREE(sub_path);
+	
+	if (node.attributes & FAT_ATTR_DIRECTORY) {
+		WARNING_LOG("The given path resolves into a directory.\n");
+		return -QCOW_NOT_A_FILE;
+	}
+
+	file -> node = node;
+	file -> size = node.size;
+	file -> offset = 0;
+	file -> attributes = node.attributes;
+	mem_set(file -> name, 0, MAX_FAT_NAME);
+	mem_cpy(file -> name, node.name, MAX_FAT_NAME);
+		
+	return QCOW_NO_ERROR;
+}
+
+int fs_opendir(fs_t* fs, const char* path, fs_dir_t* dir) {
+	u64 path_len = str_len(path);
+	char* sub_path = qcow_calloc(path_len, sizeof(char));
+	if (sub_path == NULL) {
+		WARNING_LOG("Failed to allocate buffer for sub_path.\n");
+		return -QCOW_IO_ERROR;
+	}
+
+	// TODO: Should be changed with its correct representation which is the cwd?
+	fs_node_t node = fs -> root;
+
+	int err = 0;
+	for (unsigned int prev_tok = 0; prev_tok < path_len;) {
+		int tok = str_tok(path + prev_tok, "/");
+		if (tok == -1) tok = path_len;
+		else tok += prev_tok;
+		mem_cpy(sub_path, path + prev_tok, tok - prev_tok);
+		DEBUG_LOG("looking up sub_path: '%s' from path: '%s'\n", sub_path, path);
+		if ((err = fs_lookup(fs, &node, sub_path, &node)) < 0) {
+			QCOW_SAFE_FREE(sub_path);
+			return err;
+		}
+		prev_tok = tok + 1;
+		mem_set(sub_path, 0, path_len);
+	}
+	
+	QCOW_SAFE_FREE(sub_path);
+	
+	if (!(node.attributes & FAT_ATTR_DIRECTORY)) {
+		WARNING_LOG("The given path does not resolve into a directory.\n");
+		return -QCOW_NOT_A_DIRECTORY;
+	}
+
+	dir -> node = node;
+	dir -> size = node.size;
+	dir -> attributes = node.attributes;
+	mem_set(dir -> name, 0, MAX_FAT_NAME);
+	mem_cpy(dir -> name, node.name, MAX_FAT_NAME);
+		
+	return QCOW_NO_ERROR;
+}
+
+int fs_stat(fs_t* fs, const char* path, fs_stat_t* st) {
+	TODO("Implement me!");
+	return -QCOW_TODO;
+}
+
 int fs_read(fs_file_t* file, void* buf, const int size) {
 	TODO("Implement me!");
 	return -QCOW_TODO;
@@ -782,7 +840,6 @@ int fs_readdir(fs_dir_t* dir, fs_dirent* ent) {
 	TODO("Implement me!");
 	return -QCOW_TODO;
 }
-
 
 #endif //_QCOW_FS_H_
 
