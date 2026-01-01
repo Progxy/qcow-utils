@@ -52,7 +52,28 @@ int main(void) {
 	}
 
 	print_dir_info(&dir);
-		
+	
+	do {
+		fs_dirent_t dirent = {0};
+		err = fs_readdir(&fs, &dir, &dirent);
+		if (err < 0 && -err != QCOW_END_OF_DIRECTORY) {
+			WARNING_LOG("Failed to read dir, because: %s\n", qcow_errors_str[-err]);
+			return 1;
+		} else if (-err == QCOW_END_OF_DIRECTORY) {
+			DEBUG_LOG("Reached end of directory.\n");
+		} else {
+			print_dirent_info(&dirent);
+		}
+	} while (-err != QCOW_END_OF_DIRECTORY);
+
+	fs_stat_t stat = {0};
+	if ((err = fs_stat(&fs, "EFI/BOOT", &stat)) < 0) {
+		WARNING_LOG("Failed to fs_stat, because: %s\n", qcow_errors_str[-err]);
+		return 1;
+	}
+	
+	print_stat_info(&stat);
+
 	fs_unmount(&fs);
 	
 	deinit_qcow_part();
