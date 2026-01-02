@@ -312,6 +312,7 @@ typedef enum PACKED_STRUCT QCowErrors {
 	QCOW_INVALID_WHENCE,
 	QCOW_INVALID_LFN_CHECKSUM,
 	QCOW_END_OF_CLUSTER,
+	QCOW_END_OF_FILE,
 	QCOW_TODO 
 } QCowErrors;
 
@@ -355,7 +356,8 @@ static const char* qcow_errors_str[] = {
 	"QCOW_INVALID_WHENCE",
 	"QCOW_INVALID_LFN_CHECKSUM",
 	"QCOW_END_OF_CLUSTER",
-    "QCOW_TODO" 
+ 	"QCOW_END_OF_FILE",
+ 	"QCOW_TODO" 
 };
 
 #endif //_QCOW_UTILS_H_

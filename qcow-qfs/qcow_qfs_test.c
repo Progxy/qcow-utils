@@ -44,7 +44,6 @@ int main(void) {
 		return 1;
 	}
 	
-	/* qfs_file_t file = {0}; */
 	qfs_dir_t dir = {0};
 	if ((err = qfs_opendir(&qfs, "EFI/BOOT", &dir)) < 0) {
 		WARNING_LOG("Failed to open dir, because: %s\n", qcow_errors_str[-err]);
@@ -73,6 +72,87 @@ int main(void) {
 	}
 	
 	print_stat_info(&stat);
+
+	qfs_file_t file = {0};
+	if ((err = qfs_open(&qfs, "EFI/BOOT/BOOTX64.EFI", &file, 0)) < 0) {
+		WARNING_LOG("Failed to open file, because: %s\n", qcow_errors_str[-err]);
+		return 1;
+	}
+
+	print_file_info(&file);
+	
+	if ((err = qfs_seek(&qfs, &file, 0, SEEK_END)) < 0) {
+		WARNING_LOG("Failed to seek, because: %s\n", qcow_errors_str[-err]);
+		return 1;
+	}
+
+	u64 size = qfs_tell(&file);
+
+	if ((err = qfs_seek(&qfs, &file, 0, SEEK_SET)) < 0) {
+		WARNING_LOG("Failed to seek, because: %s\n", qcow_errors_str[-err]);
+		return 1;
+	}
+
+	u8* buf = qcow_calloc(size, sizeof(u8));
+	if (buf == NULL) {
+		WARNING_LOG("Failed to allocate buffer.\n");
+		return 1;
+	}
+
+	// Testing multiple unaligned reads and single read
+	int b_size = 4095;
+	u32 read_size = 0;
+	while (read_size < size) {
+		if ((err = qfs_read(&qfs, &file, buf + read_size, b_size)) < 0) {
+			QCOW_SAFE_FREE(buf);
+			WARNING_LOG("Failed to read file, because: %s\n", qcow_errors_str[-err]);
+			return 1;
+		} else if ((err != b_size) && (read_size + err < size)) {
+			QCOW_SAFE_FREE(buf);
+			WARNING_LOG("Failed to read %d bytes and read %d instead\n", b_size, err);
+			return 1;
+		}
+
+		read_size += err;
+	}
+	
+	DEBUG_LOG("Successfully read %d bytes.\n", read_size);
+
+	if ((err = qfs_seek(&qfs, &file, 0, SEEK_SET)) < 0) {
+		QCOW_SAFE_FREE(buf);
+		WARNING_LOG("Failed to seek, because: %s\n", qcow_errors_str[-err]);
+		return 1;
+	}
+	
+	u8* buff = qcow_calloc(size, sizeof(u8));
+	if (buff == NULL) {
+		QCOW_SAFE_FREE(buf);
+		WARNING_LOG("Failed to allocate buffer.\n");
+		return 1;
+	}
+
+	if ((err = qfs_read(&qfs, &file, buff, size)) < 0) {
+		QCOW_SAFE_FREE(buf);
+		QCOW_SAFE_FREE(buff);
+		WARNING_LOG("Failed to read file, because: %s\n", qcow_errors_str[-err]);
+		return 1;
+	}
+	
+	if (mem_n_cmp(buf, buff, size)) {
+		for (unsigned int i = 0; i < size; ++i) {
+			if (buf[i] != buff[i]) {
+				printf("%u: 0x%X != 0x%X\n", i, buf[i], buff[i]);
+				break;
+			}
+		}
+		QCOW_SAFE_FREE(buf);
+		QCOW_SAFE_FREE(buff);
+		WARNING_LOG("Failed to read the same file in different ways.\n");
+		return 1;
+	}
+
+	QCOW_SAFE_FREE(buf);
+	QCOW_SAFE_FREE(buff);
 
 	qfs_unmount(&qfs);
 	

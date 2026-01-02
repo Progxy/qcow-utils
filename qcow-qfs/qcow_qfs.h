@@ -51,7 +51,7 @@ typedef struct qfs_node_t {
 
 typedef struct {
 	qfs_node_t node;
-	u64 ofqfset;
+	u64 offset;
 	u32 flags;
 	union {
 		u32 cur_cluster; // This is specific to fat_file_t
@@ -131,7 +131,7 @@ static void print_qfs_time(qfs_time_t time) {
 static void print_file_info(qfs_file_t* file) {
 	printf(" -- File Info -- \n");
 	printf("size: %u\n", file -> node.fat_node.size);
-	printf("ofqfset: %llu\n", file -> ofqfset);
+	printf("offset: %llu\n", file -> offset);
 	printf("flags: %X\n", file -> flags);
 	printf("current cluster: %u\n", file -> cur_cluster);
 	printf("name: '%s'\n", file -> node.name);
@@ -208,10 +208,10 @@ int qfs_close(qfs_t* qfs, qfs_file_t* file);
 int qfs_opendir(qfs_t* qfs, const char* path, qfs_dir_t* dir);
 int qfs_stat(qfs_t* qfs, const char* path, qfs_stat_t* stat);
 int qfs_lookup(qfs_t* qfs, const qfs_node_t* dir, const char* name, qfs_node_t* node, qfs_stat_t* stat);
-int qfs_read(qfs_file_t* file, void* buf, const int size);
+int qfs_read(qfs_t* qfs, qfs_file_t* file, void* buf, const int size);
 int qfs_write(qfs_file_t* file, const void* buf, const int size);
-int qfs_seek(qfs_file_t* file, const u64 off, const int whence);
-inline u64 qfs_tell(qfs_file_t* file);
+int qfs_seek(qfs_t* qfs, qfs_file_t* file, const u64 off, const int whence);
+u64 qfs_tell(qfs_file_t* file);
 int qfs_readdir(qfs_t* qfs, qfs_dir_t* dir, qfs_dirent_t* ent);
 
 // Exposed API Functions
@@ -277,7 +277,7 @@ int qfs_lookup(qfs_t* qfs, const qfs_node_t* dir, const char* s_name, qfs_node_t
 		stat -> mod_time    = fat_time_to_qfs_time(fat_entry.mdate, fat_entry.mtime);
 	}
 			
-	return -QCOW_FILE_NOT_FOUND;
+	return QCOW_NO_ERROR;
 }
 
 int qfs_open(qfs_t* qfs, const char* path, qfs_file_t* file, u32 flags) {
@@ -314,7 +314,7 @@ int qfs_open(qfs_t* qfs, const char* path, qfs_file_t* file, u32 flags) {
 	}
 
 	file -> node = node;
-	file -> ofqfset = 0;
+	file -> offset = 0;
 	file -> cur_cluster = node.fat_node.first_cluster;
 	file -> flags = flags;
 
@@ -400,9 +400,19 @@ int qfs_stat(qfs_t* qfs, const char* path, qfs_stat_t* stat) {
 	return QCOW_NO_ERROR;
 }
 
-int qfs_read(qfs_file_t* file, void* buf, const int size) {
-	TODO("Implement me!");
-	return -QCOW_TODO;
+int qfs_read(qfs_t* qfs, qfs_file_t* file, void* buf, const int size) {
+	if (file -> offset >= file -> node.fat_node.size) return -QCOW_END_OF_FILE;
+	
+	int read_size = size;
+	if (file -> offset + size > file -> node.fat_node.size) read_size = file -> node.fat_node.size - file -> offset;
+	
+	int bytes_read = fat_read(&(qfs -> qfs_fat), &(file -> offset), &(file -> cur_cluster), buf, read_size);
+	if (bytes_read < 0) {
+		WARNING_LOG("Failed to read from fat file.\n");
+		return bytes_read;
+	}
+
+	return bytes_read;
 }
 
 int qfs_write(qfs_file_t* file, const void* buf, const int size) {
@@ -410,16 +420,20 @@ int qfs_write(qfs_file_t* file, const void* buf, const int size) {
 	return -QCOW_TODO;
 }
 
-int qfs_seek(qfs_file_t* file, const u64 off, const int whence) {
+int qfs_seek(qfs_t* qfs, qfs_file_t* file, const u64 off, const int whence) {
 	if (whence == QFS_SEEK_SET) {
 		if (off > file -> node.fat_node.size) return -QCOW_INVALID_OFFSET;
-		file -> ofqfset = off;
+		file -> offset = off;
+		const u64 cluster_off = (off - (off % qfs -> qfs_fat.cluster_size)) / qfs -> qfs_fat.cluster_size;
+		file -> cur_cluster = file -> node.fat_node.first_cluster + cluster_off;
 		return QCOW_NO_ERROR;
 	}
 
 	if (whence == QFS_SEEK_CUR) {
-		if (off + file -> ofqfset > file -> node.fat_node.size) return -QCOW_INVALID_OFFSET;
-		file -> ofqfset += off;		
+		if (off + file -> offset > file -> node.fat_node.size) return -QCOW_INVALID_OFFSET;
+		file -> offset += off;		
+		const u64 cluster_off = (off - (off % qfs -> qfs_fat.cluster_size)) / qfs -> qfs_fat.cluster_size;
+		file -> cur_cluster = file -> node.fat_node.first_cluster + cluster_off;
 		return QCOW_NO_ERROR;
 	}
 
@@ -428,13 +442,15 @@ int qfs_seek(qfs_file_t* file, const u64 off, const int whence) {
 		return -QCOW_INVALID_WHENCE;
 	}
 
-	file -> ofqfset = file -> node.fat_node.size;
+	file -> offset = file -> node.fat_node.size;
+	const u64 cluster_off = (off - (off % qfs -> qfs_fat.cluster_size)) / qfs -> qfs_fat.cluster_size;
+	file -> cur_cluster = file -> node.fat_node.first_cluster + cluster_off;
 
 	return QCOW_NO_ERROR;
 }
 
-inline u64 qfs_tell(qfs_file_t* file) {
-	return file -> ofqfset;
+u64 qfs_tell(qfs_file_t* file) {
+	return file -> offset;
 }
 
 int qfs_readdir(qfs_t* qfs, qfs_dir_t* dir, qfs_dirent_t* ent) {
@@ -444,7 +460,7 @@ int qfs_readdir(qfs_t* qfs, qfs_dir_t* dir, qfs_dirent_t* ent) {
 	int err = fat_readdir(&(qfs -> qfs_fat), &(dir -> cur_cluster), &fat_entry, &(dir -> entry_idx), ent -> name);
 	if (-err == QCOW_END_OF_DIRECTORY) {
 		dir -> entries_cnt = dir -> entry_idx;
-		return QCOW_NO_ERROR;
+		return -QCOW_END_OF_DIRECTORY;
 	} else if (err < 0) {
 		return err;
 	}

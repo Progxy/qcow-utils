@@ -1325,6 +1325,7 @@ static int get_lba_img_offset_for_write(QCowCtx qcow_ctx, u64 offset, u64* img_o
 	return QCOW_NO_ERROR;
 }
 
+/// TODO: This function writes at most qcow_ctx.cluster_size bytes
 int qwrite(const void* data, unsigned int size, size_t nmemb, unsigned int offset, QCowCtx qcow_ctx) {	
 	int err = 0;
 	u64 img_offset = 0;
@@ -1428,6 +1429,7 @@ static int read_from_backing_file(void* ptr, size_t size, size_t nmemb, u64 clus
 	return QCOW_NO_ERROR;
 }
 
+/// TODO: This function reads at most qcow_ctx.cluster_size bytes
 /// NOTE: the function expects that the ptr has been already allocated, so that it has no responsibility for its de/allocation.
 int qread(void* ptr, size_t size, size_t nmemb, unsigned int offset, QCowCtx qcow_ctx) {
 	int err = 0;
@@ -1490,9 +1492,11 @@ int qread(void* ptr, size_t size, size_t nmemb, unsigned int offset, QCowCtx qco
 			return err;
 		}
 		
-		mem_cpy(ptr, cluster + (offset % qcow_ctx.cluster_size), MIN(cluster_data_size, size * nmemb));
+		const u64 read_size = MIN(cluster_data_size - (offset % cluster_data_size), size * nmemb);
+		mem_cpy(ptr, cluster + (offset % cluster_data_size), read_size);
 		QCOW_SAFE_FREE(cluster);
-			
+		
+		/* return read_size; */	
 		return QCOW_NO_ERROR;
 	} 
 

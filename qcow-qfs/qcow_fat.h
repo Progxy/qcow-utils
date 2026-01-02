@@ -326,8 +326,9 @@ static int parse_fat_tables(qfs_fat_t* qfs_fat) {
 			return -QCOW_IO_ERROR;
 		}
 
-		const u64 fat_region_ofqfs_fatet = qfs_fat -> bpb_sector.rsv_sectors_cnt * (qfs_fat -> bpb_sector.bytes_per_sector / SECTOR_SIZE) + (j * qfs_fat -> fat_table_size / SECTOR_SIZE);
-		if (get_n_sector_at(qfs_fat -> start_lba + fat_region_ofqfs_fatet, qfs_fat -> fat_table_size / SECTOR_SIZE, qfs_fat -> fat_tables[j])) {
+		DEBUG_LOG("table_size: %llu - %llu\n", qfs_fat -> fat_table_size, qfs_fat -> fat_table_size / SECTOR_SIZE);
+		const u64 fat_region_offset = (qfs_fat -> bpb_sector.rsv_sectors_cnt * qfs_fat -> bpb_sector.bytes_per_sector + j * qfs_fat -> fat_table_size) / SECTOR_SIZE;
+		if (get_n_sector_at(qfs_fat -> start_lba + fat_region_offset, qfs_fat -> fat_table_size / SECTOR_SIZE, qfs_fat -> fat_tables[j])) {
 			for (u8 z = 0; z <= j; ++z) QCOW_SAFE_FREE((qfs_fat -> fat_tables)[z]);
 			WARNING_LOG("Failed to retrieve first sector from given qcow file.\n");
 			return -QCOW_IO_ERROR;
@@ -370,7 +371,7 @@ static int fetch_next_cluster(qfs_fat_t* qfs_fat, u32* cluster_n, const bool upd
 	if (update_cluster_ref) {
 		*cluster_n = (qfs_fat -> fat_tables)[0][*cluster_n] & 0x0FFFFFFF;
 		if (*cluster_n >= FAT_END_OF_CHAIN) {
-			WARNING_LOG("Reached end of chain of the FAT table.\n");
+			DEBUG_LOG("Reached end of chain of the FAT table.\n");
 			return -QCOW_FILE_NOT_FOUND;
 		}
 
@@ -398,9 +399,8 @@ static int iterate_fat_dir(fat_dir_entry_t* fat_entry, char name[MAX_FAT_NAME], 
 	u64 name_size = 0;
 	u8 lfn_entry_checksum = 0;
 	
-	/* for (; (*entry_idx % fat_dir_entries_per_cluster) < fat_dir_entries_per_cluster; ++(*entry_idx)) { */
-	for (u64 i = (*entry_idx % fat_dir_entries_per_cluster) * sizeof(fat_dir_entry_t); i < qfs_fat -> cluster_size; ++(*entry_idx), i += sizeof(fat_dir_entry_t)) {
-		*fat_entry = ((fat_dir_entry_t*) qfs_fat -> lru_cluster)[*entry_idx % fat_dir_entries_per_cluster];
+	for (u64 i = *entry_idx % fat_dir_entries_per_cluster; i < fat_dir_entries_per_cluster; ++(*entry_idx), ++i) {
+		*fat_entry = ((fat_dir_entry_t*) qfs_fat -> lru_cluster)[i];
 		
 		if ((fat_entry -> name)[0] == FAT_EMPTY_DIR) {
 			DEBUG_LOG("Found first empty dir, and therefore the end of this directory's content.\n");
@@ -423,6 +423,8 @@ static int iterate_fat_dir(fat_dir_entry_t* fat_entry, char name[MAX_FAT_NAME], 
 			mem_cpy(name, fat_entry -> name, name_size);
 		
 			if (!(fat_entry -> attr & FAT_ATTR_DIRECTORY) && !is_whitespace((fat_entry -> ext)[0])) {
+				trim_str(name);
+				name_size = str_len(name);
 				name[name_size++] = '.';
 				const u64 entry_ext_len = str_len((const char*) fat_entry -> ext);
 				mem_cpy(name + name_size, fat_entry -> ext, entry_ext_len);
@@ -439,8 +441,10 @@ static int iterate_fat_dir(fat_dir_entry_t* fat_entry, char name[MAX_FAT_NAME], 
 		trim_str(name);
 		name_size = str_len(name) + 1;
 		
-		if (fetch_dirent || (mem_n_cmp(name, s_name, MIN(name_size, str_len(s_name))) == 0)) return QCOW_NO_ERROR;
-		
+		if (fetch_dirent || (mem_n_cmp(name, s_name, MIN(name_size, str_len(s_name))) == 0)) {
+			return QCOW_NO_ERROR;
+		}
+
 		mem_set(name, 0, MAX_FAT_NAME);
 		name_size = 0;
 	}
@@ -459,7 +463,8 @@ static int fat_lookup(qfs_fat_t* qfs_fat, u32 cluster_n, fat_dir_entry_t* fat_en
 	do {
 		u32 entry_idx = 0;
 		err = iterate_fat_dir(fat_entry, name, &entry_idx, fat_dir_entries_per_cluster, qfs_fat, FALSE, s_name);
-		if (-err == QCOW_END_OF_DIRECTORY) return -QCOW_FILE_NOT_FOUND;	
+		if (err == QCOW_NO_ERROR) return QCOW_NO_ERROR;
+		else if (-err == QCOW_END_OF_DIRECTORY) return -QCOW_FILE_NOT_FOUND;	
 		else if (-err != QCOW_END_OF_CLUSTER && err < 0) {
 			WARNING_LOG("Failed to iterate directory!\n");
 			return err;
@@ -503,6 +508,34 @@ static int fat_readdir(qfs_fat_t* qfs_fat, u32* cluster_n, fat_dir_entry_t* fat_
 	} while (TRUE);
 
 	return QCOW_NO_ERROR;
+}
+
+static int fat_read(qfs_fat_t* qfs_fat, u64* offset, u32* cluster_n, void* buf, u64 size) {
+	int err = 0;
+	if ((err = fetch_next_cluster(qfs_fat, cluster_n, FALSE)) < 0) {
+		WARNING_LOG("Failed to fetch the next cluster.\n");
+		return err;
+	}
+	
+	int bytes_read = 0;
+	while (size > 0) {
+		const u32 readable_size = qfs_fat -> cluster_size - (*offset % qfs_fat -> cluster_size);
+		mem_cpy((u8*) buf + bytes_read, qfs_fat -> lru_cluster + (*offset % qfs_fat -> cluster_size), MIN(size, readable_size));
+		
+		bytes_read += MIN(size, readable_size);
+		*offset += MIN(size, readable_size); 
+		size -= MIN(size, readable_size);
+		
+		if (*offset % qfs_fat -> cluster_size == 0) {
+			if (((err = fetch_next_cluster(qfs_fat, cluster_n, TRUE)) < 0) && (size > 0)) {
+				WARNING_LOG("Failed to fetch the next cluster.\n");
+				return err;
+			}
+		}
+		
+	}
+	
+	return bytes_read;
 }
 
 #endif //_QCOW_FAT_H_

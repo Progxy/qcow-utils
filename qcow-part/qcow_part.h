@@ -133,7 +133,9 @@ static int get_n_sector_at(const unsigned int at, const unsigned int cnt, void* 
 		WARNING_LOG("Failed to read %llu bytes at LBA 0x%llX, ret: %d - '%s'\n", size, offset, err, qcow_errors_str[-err]);
 		return err;
 	}
-	
+
+	if (err > 0) DEBUG_LOG("Read %d bytes out of requested %llu.\n", err, size);
+
 	return QCOW_NO_ERROR;
 }
 
