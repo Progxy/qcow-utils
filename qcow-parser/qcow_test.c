@@ -50,32 +50,82 @@ int main(int argc, char* argv[]) {
 
 	const char* path_qcow = argv[1];
 	
-	QCowCtx qcow_ctx = {0};
+	qcow_ctx_t qcow_ctx = {0};
 	if (init_qcow(&qcow_ctx, path_qcow) < 0) {
 		WARNING_LOG("Failed to parse the qcow image.\n");
 		return -1;
 	}
 	
+	u64 size = 375000;
 	u64 offset = 0x7000;
-	unsigned char data[32] = {0};
+	u8* original_data = qcow_calloc(size, sizeof(u8));
+	if (original_data == NULL) {
+		WARNING_LOG("Failed to allocate original data buffer.\n");
+		return 1;
+	}
+
+	DEBUG_LOG("Reading original data...\n");
+	int ret = qread(original_data, size, sizeof(u8), offset, qcow_ctx);
+	if (ret < 0) {
+		QCOW_SAFE_FREE(original_data);
+		WARNING_LOG("Failed to read %llu bytes at LBA 0x%llX, ret: %d - '%s'\n", size, offset, ret, qcow_errors_str[-ret]);
+		deinit_qcow(&qcow_ctx);
+		return -1;
+	}
+	
+	u8* data = qcow_calloc(size, sizeof(u8));
+	if (data == NULL) {
+		QCOW_SAFE_FREE(original_data);
+		WARNING_LOG("Failed to allocate original data buffer.\n");
+		return 1;
+	}
+
 	data[7] = 0x07;
 	data[10] = 0x10;
-	int ret = qwrite(data, sizeof(unsigned char), 32, offset, qcow_ctx);
+	data[17] = 0x17;
+	data[370000] = 0x07;
+	data[370010] = 0x10;
+	data[370017] = 0x17;
+
+	DEBUG_LOG("Writing new data...\n");
+	ret = qwrite(data, size, sizeof(u8), offset, qcow_ctx);
 	if (ret < 0) {
-		WARNING_LOG("Failed to write %u bytes at address 0x%llX, err: '%s'\n", 32, offset, qcow_errors_str[-ret]);
+		QCOW_SAFE_FREE(original_data);
+		QCOW_SAFE_FREE(data);
+		WARNING_LOG("Failed to write %llu bytes at address 0x%llX, err: '%s'\n", size, offset, qcow_errors_str[-ret]);
 		deinit_qcow(&qcow_ctx);
 		return -QCOW_IO_ERROR;
 	}
 
-	ret = qread(data, sizeof(unsigned char), 32, offset, qcow_ctx);
+	DEBUG_LOG("Reading back new data...\n");
+	ret = qread(data, size, sizeof(u8), offset, qcow_ctx);
 	if (ret < 0) {
-		WARNING_LOG("Failed to read %u bytes at LBA 0x%llX, ret: %d - '%s'\n", 32, offset, ret, qcow_errors_str[-ret]);
+		QCOW_SAFE_FREE(original_data);
+		QCOW_SAFE_FREE(data);
+		WARNING_LOG("Failed to read %llu bytes at LBA 0x%llX, ret: %d - '%s'\n", size, offset, ret, qcow_errors_str[-ret]);
 		deinit_qcow(&qcow_ctx);
 		return -1;
 	}
 	
 	DEBUG_LOG("Data, in address range (0x%llX - 0x%llX):\n", offset, offset + 32);
-	for (unsigned char i = 0; i < 32; ++i) printf("[0x%llX]: 0x%X\n", offset + i, data[i]);
+	for (u8 i = 0; i < 32; ++i) printf("[0x%llX]: 0x%X\n", offset + i, data[i]);
+
+	const u64 n_off = 370000;
+	DEBUG_LOG("Data, in address range (0x%llX - 0x%llX):\n", offset + n_off, offset + n_off + 32);
+	for (u8 i = 0; i < 32; ++i) printf("[0x%llX]: 0x%X\n", offset + i + n_off, data[i + n_off]);
+
+	DEBUG_LOG("Writing back original data...\n");
+	ret = qwrite(original_data, size, sizeof(u8), offset, qcow_ctx);
+	if (ret < 0) {
+		QCOW_SAFE_FREE(original_data);
+		QCOW_SAFE_FREE(data);
+		WARNING_LOG("Failed to write %llu bytes at address 0x%llX, err: '%s'\n", size, offset, qcow_errors_str[-ret]);
+		deinit_qcow(&qcow_ctx);
+		return -QCOW_IO_ERROR;
+	}
+	
+	QCOW_SAFE_FREE(original_data);
+	QCOW_SAFE_FREE(data);
 
 	deinit_qcow(&qcow_ctx);
 

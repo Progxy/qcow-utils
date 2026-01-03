@@ -131,8 +131,6 @@ static int get_n_sector_at(const unsigned int at, const unsigned int cnt, void* 
 		return err;
 	}
 
-	if (err > 0) DEBUG_LOG("Read %d bytes out of requested %llu.\n", err, size);
-
 	return QCOW_NO_ERROR;
 }
 
