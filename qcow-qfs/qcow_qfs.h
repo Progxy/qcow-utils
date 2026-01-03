@@ -25,12 +25,13 @@
 #include "../qcow-parser/qcow_parser.h"
 #include "../qcow-part/qcow_part.h"
 #include "./qcow_fat.h"
+#include "./qcow_ext4.h"
 
 typedef enum { MAX_QFS_NAME = 256 } QFSConstants;
 typedef enum { QFS_DIRECTORY = 0x01, QFS_FILE = 0x02 } QFSNodeType;
 typedef enum { QFS_IRW = 0x04 } QFSMode;
 typedef enum { QFS_SEEK_SET = 0, QFS_SEEK_CUR, QFS_SEEK_END } QFSWhence;
-typedef enum { QFS_FAT = 0 } QFSType;
+typedef enum { QFS_FAT = 0, QFS_EXT4 = 1 } QFSType;
 
 typedef struct {
 	u16 year;
@@ -88,7 +89,8 @@ typedef struct {
 	// TODO: Maybe should also add the qfs_node_t cwd
 	
 	union {
-		qfs_fat_t qfs_fat;
+		qfs_fat_t  qfs_fat;
+		qfs_ext4_t qfs_ext4;
 	};
 } qfs_ctx;
 
@@ -228,14 +230,26 @@ int qfs_mount(const partition_t partition, qfs_t* qfs) {
 		(qfs -> root.name)[0]  = '/';
 
 		DEBUG_LOG("Partition successfully mounted.\n");
+		
 		return QCOW_NO_ERROR;
 	} else if (-err == QCOW_IO_ERROR) {
 		WARNING_LOG("Failed to parse the FAT partition.\n");
 		return err;
 	} 
 	
-	TODO("try parsing other qfs.");
-	return -QCOW_TODO;
+	err = parse_ext4_fs(&(qfs -> qfs_ext4));
+	if (err == 0) {
+		qfs -> qfs_type = QFS_EXT4;
+		
+		DEBUG_LOG("Partition successfully mounted.\n");
+		
+		return QCOW_NO_ERROR;
+	} else if (err < 0) {
+		WARNING_LOG("Failed to parse the EXT4 partition.\n");
+		return err;
+	} 
+	
+	return -QCOW_UNREACHABLE;
 }
 
 void qfs_unmount(qfs_t* qfs) {
@@ -244,7 +258,9 @@ void qfs_unmount(qfs_t* qfs) {
 		QCOW_SAFE_FREE(qfs -> qfs_fat.fat_tables);
 		QCOW_SAFE_FREE(qfs -> qfs_fat.lru_cluster);
 	}
+	
 	DEBUG_LOG("Partition successfully unmounted.\n");
+	
 	return; 
 }
 

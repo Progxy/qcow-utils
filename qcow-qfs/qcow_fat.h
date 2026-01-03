@@ -286,6 +286,7 @@ static int parse_bpb_sector(qfs_fat_t* qfs_fat) {
 	
 	int err = is_valid_fat_qfs(qfs_fat);
 	if (err < 0 && qfs_fat -> bpb_sector.backup_bpb_sector == 6) {
+		DEBUG_LOG("Reading backup BPB sector.\n");
 		const u64 backup_bpb_offset = qfs_fat -> bpb_sector.backup_bpb_sector * (qfs_fat -> bpb_sector.bytes_per_sector / SECTOR_SIZE);
 		if (get_sector_at(qfs_fat -> start_lba + backup_bpb_offset, &(qfs_fat -> bpb_sector))) {
 			WARNING_LOG("Failed to retrieve backup BPB sector from given qcow file.\n");
@@ -297,7 +298,10 @@ static int parse_bpb_sector(qfs_fat_t* qfs_fat) {
 			WARNING_LOG("Failed to parse FAT partition.\n");
 			return err;
 		}
-	} 
+	} else if (err < 0) {
+		WARNING_LOG("Failed to parse FAT partition.\n");
+		return err;
+	}
 	
 	qfs_fat -> fat_type = determine_fat_type(qfs_fat);
 	DEBUG_LOG("FAT Type: %s\n", fat_type_str[qfs_fat -> fat_type]);
