@@ -175,7 +175,7 @@ static inline int write_at(FILE* file, u64 offset, const void* data, size_t size
 static inline int read_at(FILE* file, u64 offset, void* data, size_t size, size_t nmemb);
 static inline int zero_out_at(FILE* file, u64 offset, u64 n);
 static inline void deinit_qcow(QCowCtx* qcow_ctx);
-static inline void format_qcow_header(QCowHeader* qcow_header, unsigned char version);
+static inline void format_qcow_header(QCowHeader* qcow_header, u8 version);
 static inline void dump_qcow_header(const QCowHeader* qcow_header);
 static inline void dump_qcow_header_extension(const QCowHeaderExtension* qcow_header_ext);
 static int parse_qcow_ext(QCowHeaderExtension** qcow_exts, FILE* file);
@@ -194,13 +194,19 @@ static int extend_img_file(FILE* file, u64 n, u64 file_boundary_base, u64 bounda
 static inline int find_unallocated_cluster(QCowCtx qcow_ctx, u64* offset);
 static int alloc_cluster(QCowCtx qcow_ctx, u64* cluster_offset);
 static int cow_alloc_cluster(QCowCtx qcow_ctx, u64 offset, u64* cluster_offset);
-static int write_compressed_cluster(QCowCtx qcow_ctx, u64 img_offset, unsigned int* recompressed_cluster_size, unsigned int compressed_cluster_size, unsigned char* cluster, unsigned int cluster_data_size);
-static int read_compressed_cluster(QCowCtx qcow_ctx, FILE* file, u64* cluster_offset, unsigned char** clusters, unsigned int *cluster_data_size, unsigned int* compressed_clusters_size);
+static int write_compressed_cluster(QCowCtx qcow_ctx, u64 img_offset, unsigned int* recompressed_cluster_size, unsigned int compressed_cluster_size, u8* cluster, unsigned int cluster_data_size);
+static int read_compressed_cluster(QCowCtx qcow_ctx, FILE* file, u64* cluster_offset, u8** clusters, unsigned int *cluster_data_size, unsigned int* compressed_clusters_size);
 static int get_lba_img_offset_for_write(QCowCtx qcow_ctx, u64 offset, u64* img_offset, SubclusterInfo* subcluster_info);
 int qwrite(const void* data, unsigned int size, size_t nmemb, unsigned int offset, QCowCtx qcow_ctx) ;
 int qread(void* ptr, size_t size, size_t nmemb, unsigned int offset, QCowCtx qcow_ctx);
 
 /* -------------------------------------------------------------------------------------------------------- */
+// ------------------------
+// Static Variables
+// ------------------------
+#define deinit_default_qcow()        deinit_qcow(&default_qcow_ctx)
+#define init_default_qcow(qcow_path) init_qcow(&default_qcow_ctx, qcow_path)
+static QCowCtx default_qcow_ctx = {0};
 
 static inline QCowExtType to_qcow_ext_type(u32 val) {
     const u32 qcow_ext_types[] = { 0x00000000, 0xE2792ACA, 0x6803F857, 0x23852875, 0x0537BE77, 0x44415441, 0x00000001 };
@@ -210,6 +216,7 @@ static inline QCowExtType to_qcow_ext_type(u32 val) {
     return UNKNOWN_EXTENSION;
 }
 
+/* -------------------------------------------------------------------------------------------------------- */
 static inline int write_at(FILE* file, u64 offset, const void* data, size_t size, size_t nmemb) {
 	int ret = fseek(file, offset, SEEK_SET);							
 	if (ret < 0) {															
@@ -249,9 +256,9 @@ static inline int zero_out_at(FILE* file, u64 offset, u64 n) {
 		}															
 	}									
 
-	unsigned char zero[] = {0};										
+	u8 zero[] = {0};										
 	for (unsigned int i = 0; i < n; ++i) {							
-		if (fwrite(zero, sizeof(unsigned char), 1, file) != 1) {	
+		if (fwrite(zero, sizeof(u8), 1, file) != 1) {	
 			PERROR_LOG("Failed to write zero at pos 0x%llX", offset + i);								
 			return -QCOW_IO_ERROR;									
 		}															
@@ -300,7 +307,7 @@ static inline void deinit_qcow(QCowCtx* qcow_ctx) {
 	return;
 }
 
-static inline void format_qcow_header(QCowHeader* qcow_header, unsigned char version) {
+static inline void format_qcow_header(QCowHeader* qcow_header, u8 version) {
 	if (version == 2) {
 		QCOW_BE_CONVERT(&qcow_header -> version, sizeof(qcow_header -> version));
 		QCOW_BE_CONVERT(&qcow_header -> backing_file_offset, sizeof(qcow_header -> backing_file_offset));
@@ -402,7 +409,7 @@ static int parse_qcow_ext(QCowHeaderExtension** qcow_exts, FILE* file) {
 		QCOW_BE_CONVERT(&(qcow_ext_header.ext_length), sizeof(u32));	
 		
 		if (qcow_ext_header.ext_length) {
-			qcow_ext_header.data = (unsigned char*) calloc(qcow_ext_header.ext_length, sizeof(unsigned char));
+			qcow_ext_header.data = (u8*) calloc(qcow_ext_header.ext_length, sizeof(u8));
 			if (qcow_ext_header.data == NULL) {
 				for (int i = 0; i < exts_cnt; ++i) QCOW_SAFE_FREE((*qcow_exts) -> data); 
 				QCOW_SAFE_FREE(*qcow_exts);
@@ -410,7 +417,7 @@ static int parse_qcow_ext(QCowHeaderExtension** qcow_exts, FILE* file) {
 				return -QCOW_IO_ERROR;
 			}
 			
-			if (fread(qcow_ext_header.data, sizeof(unsigned char), qcow_ext_header.ext_length, file) != qcow_ext_header.ext_length) {
+			if (fread(qcow_ext_header.data, sizeof(u8), qcow_ext_header.ext_length, file) != qcow_ext_header.ext_length) {
 				for (int i = 0; i < exts_cnt; ++i) QCOW_SAFE_FREE((*qcow_exts) -> data); 
 				QCOW_SAFE_FREE(*qcow_exts);
 				PERROR_LOG("An error occurred while reading the data");
@@ -419,8 +426,8 @@ static int parse_qcow_ext(QCowHeaderExtension** qcow_exts, FILE* file) {
 
 			// Padding zero-data to set the current pos to the next multiple of 8
 			u64 padding = 0;
-			unsigned char padding_size = 8 - (qcow_ext_header.ext_length % 8);
-			if (padding_size < 8 && fread(&padding, sizeof(unsigned char), padding_size, file) != padding_size) {
+			u8 padding_size = 8 - (qcow_ext_header.ext_length % 8);
+			if (padding_size < 8 && fread(&padding, sizeof(u8), padding_size, file) != padding_size) {
 				for (int i = 0; i < exts_cnt; ++i) QCOW_SAFE_FREE((*qcow_exts) -> data); 
 				QCOW_SAFE_FREE(*qcow_exts);
 				PERROR_LOG("Failed to read the padding with size %u bytes", padding_size);
@@ -473,7 +480,7 @@ static int parse_ref_cnt_table(QCowCtx* qcow_ctx) {
 			return ret;
 		}
 
-		QCOW_BE_CONVERT((unsigned char*) &refcount_block_offset, sizeof(u64));
+		QCOW_BE_CONVERT((u8*) &refcount_block_offset, sizeof(u64));
 
 		// The refcount table and its clusters are unallocated
 		if (refcount_block_offset == 0) continue; 
@@ -498,11 +505,11 @@ static int parse_ref_cnt_table(QCowCtx* qcow_ctx) {
 		}
 
 		for (unsigned int i = 0; i < qcow_ctx -> refcount_block_entries; ++i) {
-			if (fread(QCOW_CAST_PTR((qcow_ctx -> refcount_table)[refcnt_block], unsigned char) + i * qcow_ctx -> refcount_bytes, qcow_ctx -> refcount_bytes, 1, qcow_ctx -> img_file) != 1) {
+			if (fread(QCOW_CAST_PTR((qcow_ctx -> refcount_table)[refcnt_block], u8) + i * qcow_ctx -> refcount_bytes, qcow_ctx -> refcount_bytes, 1, qcow_ctx -> img_file) != 1) {
 				PERROR_LOG("Failed to read the refcount");
 				return -QCOW_IO_ERROR;
 			}
-			QCOW_BE_CONVERT(QCOW_CAST_PTR((qcow_ctx -> refcount_table)[refcnt_block], unsigned char) + i * qcow_ctx -> refcount_bytes, qcow_ctx -> refcount_bytes);
+			QCOW_BE_CONVERT(QCOW_CAST_PTR((qcow_ctx -> refcount_table)[refcnt_block], u8) + i * qcow_ctx -> refcount_bytes, qcow_ctx -> refcount_bytes);
 		}
 	}
 
@@ -525,7 +532,7 @@ static int parse_l1_table(QCowCtx* qcow_ctx) {
 			return ret;
 		}
 		
-		QCOW_BE_CONVERT((unsigned char*) &l2_offset, sizeof(u64));
+		QCOW_BE_CONVERT((u8*) &l2_offset, sizeof(u64));
 		
 		// The l2 table and its clusters are unallocated
 		if (l2_offset == 0 || (l2_offset & QCOW_MASK_BITS_INTERVAL(56, 9)) == 0) continue; 
@@ -550,11 +557,11 @@ static int parse_l1_table(QCowCtx* qcow_ctx) {
 		}	
 
 		for (unsigned int i = 0; i < qcow_ctx -> table_cluster_entries; ++i) {
-			if (fread(QCOW_CAST_PTR((qcow_ctx -> l1_table)[l2_entry], unsigned char) + i * qcow_ctx -> l2_entries_size, qcow_ctx -> l2_entries_size, 1, qcow_ctx -> img_file) != 1) {
+			if (fread(QCOW_CAST_PTR((qcow_ctx -> l1_table)[l2_entry], u8) + i * qcow_ctx -> l2_entries_size, qcow_ctx -> l2_entries_size, 1, qcow_ctx -> img_file) != 1) {
 				PERROR_LOG("Failed to read the l2 table entry");
 				return -QCOW_IO_ERROR;
 			}
-			QCOW_BE_CONVERT(QCOW_CAST_PTR((qcow_ctx -> l1_table)[l2_entry], unsigned char) + i * qcow_ctx -> l2_entries_size, qcow_ctx -> l2_entries_size);
+			QCOW_BE_CONVERT(QCOW_CAST_PTR((qcow_ctx -> l1_table)[l2_entry], u8) + i * qcow_ctx -> l2_entries_size, qcow_ctx -> l2_entries_size);
 		}
 	}
 
@@ -632,7 +639,7 @@ static int recompute_ref_cnt(QCowCtx* qcow_ctx) {
 		if ((qcow_ctx -> l1_table)[l2_entry] == NULL) continue;
 		for (unsigned int j = 0; j < qcow_ctx -> table_cluster_entries; ++j) {
 			u64 cluster_offset = 0;
-			mem_cpy(&cluster_offset, QCOW_CAST_PTR((qcow_ctx -> l1_table)[l2_entry], unsigned char) + j * qcow_ctx -> l2_entries_size, sizeof(u64));
+			mem_cpy(&cluster_offset, QCOW_CAST_PTR((qcow_ctx -> l1_table)[l2_entry], u8) + j * qcow_ctx -> l2_entries_size, sizeof(u64));
 			if ((cluster_offset & QCOW_MASK_BITS_INTERVAL(56, 9)) == 0 && (((cluster_offset >> 63) & 1) == 0 || qcow_ctx -> backing_file == NULL)) {
 				u64 offset = j + (l2_entry * qcow_ctx -> cluster_size * qcow_ctx -> table_cluster_entries);
 				if ((err = update_ref_cnt(*qcow_ctx, offset, 1)) < 0) {
@@ -675,7 +682,7 @@ static inline int check_version_three_features(QCowHeader* qcow_header, QCowCtx*
 	
 	int err = 0;
 	u64 compression_type_field = 0;
-	unsigned char compression_type_flag = (qcow_header -> incompatible_features >> 3) & 1;
+	u8 compression_type_flag = (qcow_header -> incompatible_features >> 3) & 1;
 	if (qcow_header -> header_length == 104 && compression_type_flag) {
 		WARNING_LOG("Missing compression type field.\n");
 		return -QCOW_MISSING_COMPRESSION_TYPE_FIELD;
@@ -684,7 +691,7 @@ static inline int check_version_three_features(QCowHeader* qcow_header, QCowCtx*
 		return err;
 	}
 	
-	qcow_ctx -> compression_type = QCOW_CAST_PTR(&compression_type_field, unsigned char)[0];
+	qcow_ctx -> compression_type = QCOW_CAST_PTR(&compression_type_field, u8)[0];
 
 	if (compression_type_field & QCOW_MASK_BITS_INTERVAL(63, 1)) {
 		WARNING_LOG("Use of reserved field/padding in compression type field.\n");
@@ -725,7 +732,7 @@ static int parse_qcow_header(QCowCtx* qcow_ctx, QCowHeader* qcow_header) {
 		return -QCOW_CLUSTER_BITS_TOO_SMALL;
 	} 
 
-	if (fread(QCOW_CAST_PTR(qcow_header, unsigned char) + QCOW_HEADER2_SIZE, QCOW_HEADER3_EXT, 1, qcow_ctx -> img_file) != 1) {
+	if (fread(QCOW_CAST_PTR(qcow_header, u8) + QCOW_HEADER2_SIZE, QCOW_HEADER3_EXT, 1, qcow_ctx -> img_file) != 1) {
 		PERROR_LOG("An error occurred while reading the qcow header");
 		return -QCOW_IO_ERROR;
 	}
@@ -775,7 +782,7 @@ static int init_backing_file(QCowCtx* qcow_ctx) {
 	
 	int err = 0;
 	char path_backing_file[1024] = {0};
-	if ((err = read_at(qcow_ctx -> img_file, qcow_ctx -> backing_file_offset, path_backing_file, sizeof(unsigned char), qcow_ctx -> backing_file_size)) < 0) {
+	if ((err = read_at(qcow_ctx -> img_file, qcow_ctx -> backing_file_offset, path_backing_file, sizeof(u8), qcow_ctx -> backing_file_size)) < 0) {
 		WARNING_LOG("Failed to read the backing file name.\n");
 		return err;
 	}
@@ -878,7 +885,7 @@ int init_qcow(QCowCtx* qcow_ctx, const char* path_qcow) {
 
 	QCOW_SAFE_FREE(qcow_header_exts);
 
-	mem_cpy(QCOW_CAST_PTR(qcow_ctx, unsigned char) + sizeof(CompressionType), QCOW_CAST_PTR(&qcow_header, unsigned char) + QCOW_HEADER_HEADER_START, SHARED_FIELDS_SIZE);
+	mem_cpy(QCOW_CAST_PTR(qcow_ctx, u8) + sizeof(CompressionType), QCOW_CAST_PTR(&qcow_header, u8) + QCOW_HEADER_HEADER_START, SHARED_FIELDS_SIZE);
 
 	qcow_ctx -> cluster_size = 1 << qcow_header.cluster_bits;
 	qcow_ctx -> refcount_bytes = (1 << qcow_header.refcount_order) / 8;
@@ -919,7 +926,7 @@ static inline int get_ref_cnt(QCowCtx qcow_ctx, u64 offset, u64* ref_cnt) {
 		return QCOW_NO_ERROR;
 	}
 	
-	mem_cpy(ref_cnt, QCOW_CAST_PTR((qcow_ctx.refcount_table)[refcount_table_index], unsigned char) + refcount_block_index * qcow_ctx.refcount_bytes, qcow_ctx.refcount_bytes);
+	mem_cpy(ref_cnt, QCOW_CAST_PTR((qcow_ctx.refcount_table)[refcount_table_index], u8) + refcount_block_index * qcow_ctx.refcount_bytes, qcow_ctx.refcount_bytes);
 	
 	return QCOW_NO_ERROR;
 }
@@ -932,7 +939,7 @@ static int allocate_ref_cnt_table(QCowCtx qcow_ctx, u64 refcount_table_index) {
 		return err;
 	}
 	
-	QCOW_BE_CONVERT((unsigned char*) &refcnt_block_offset, sizeof(u64));
+	QCOW_BE_CONVERT((u8*) &refcnt_block_offset, sizeof(u64));
 	u64 offset = qcow_ctx.refcount_table_offset + refcount_table_index * sizeof(u64);
 	if ((err = write_at(qcow_ctx.img_file, offset, &refcnt_block_offset, sizeof(u64), 1)) < 0) {
 		WARNING_LOG("Failed to update the ref_cnt_table index.\n");
@@ -963,7 +970,7 @@ static int update_ref_cnt(QCowCtx qcow_ctx, u64 offset, u64 new_ref_cnt) {
 		}
 	}
 
-	mem_cpy(QCOW_CAST_PTR((qcow_ctx.refcount_table)[refcount_table_index], unsigned char) + refcount_block_index * qcow_ctx.refcount_bytes, &new_ref_cnt, qcow_ctx.refcount_bytes);
+	mem_cpy(QCOW_CAST_PTR((qcow_ctx.refcount_table)[refcount_table_index], u8) + refcount_block_index * qcow_ctx.refcount_bytes, &new_ref_cnt, qcow_ctx.refcount_bytes);
 	
 	u64 refcount_block_offset = 0;
 	u64 table_offset = qcow_ctx.refcount_table_offset + refcount_table_index * sizeof(u64);
@@ -972,13 +979,13 @@ static int update_ref_cnt(QCowCtx qcow_ctx, u64 offset, u64 new_ref_cnt) {
 		return err;
 	} 
 
-	QCOW_BE_CONVERT((unsigned char*) &refcount_block_offset, sizeof(u64));
+	QCOW_BE_CONVERT((u8*) &refcount_block_offset, sizeof(u64));
 	if (refcount_block_offset & QCOW_MASK_BITS_INTERVAL(9, 0)) {
 		WARNING_LOG("Reserved bits set in refcount_block_offset: 0x%llX\n", refcount_block_offset);
 		return -QCOW_USE_OF_RESERVED_FIELD;
 	}
 	
-	QCOW_BE_CONVERT((unsigned char*) &new_ref_cnt, qcow_ctx.refcount_bytes);
+	QCOW_BE_CONVERT((u8*) &new_ref_cnt, qcow_ctx.refcount_bytes);
 	if ((err = write_at(qcow_ctx.img_file, refcount_block_offset + refcount_block_index * qcow_ctx.refcount_bytes, &new_ref_cnt, qcow_ctx.refcount_bytes, 1))) {
 		WARNING_LOG("Failed to update the ref_cnt.\n");
 		return err;
@@ -999,10 +1006,10 @@ static inline int lba_to_img_offset(QCowCtx qcow_ctx, u64 offset, u64* img_offse
 		return -QCOW_UNALLOCATED_L1_TABLE;
 	}
 	
-	mem_cpy(img_offset, QCOW_CAST_PTR((qcow_ctx.l1_table)[l1_index], unsigned char) + l2_index * qcow_ctx.l2_entries_size, sizeof(u64));
+	mem_cpy(img_offset, QCOW_CAST_PTR((qcow_ctx.l1_table)[l1_index], u8) + l2_index * qcow_ctx.l2_entries_size, sizeof(u64));
 	
-	if (*img_offset == 0 || *img_offset == (1ULL << 62)) {
-		WARNING_LOG("Unallocated cluster.\n");
+	if ((*img_offset & ~(1ULL << 63)) == 0 || (*img_offset & ~(1ULL << 63)) == (1ULL << 62)) {
+		WARNING_LOG("Unallocated cluster (img_offset: 0x%llX).\n", *img_offset);
 		return -QCOW_UNALLOCATED_CLUSTER;
 	} else if (!IS_COMPRESSED_CLUSTER(*img_offset) && (*img_offset & QCOW_MASK_BITS_INTERVAL(56, 9)) == 0 && ((*img_offset >> 63) & 1) && !qcow_ctx.use_erdf) {
 		WARNING_LOG("The cluster offset can be zero only if an external raw data file is used.\n");
@@ -1016,7 +1023,7 @@ static inline int lba_to_img_offset(QCowCtx qcow_ctx, u64 offset, u64* img_offse
 	}
 	
 	if (qcow_ctx.use_extended_l2_entries && subcluster_info != NULL) {
-		mem_cpy(subcluster_info, QCOW_CAST_PTR((qcow_ctx.l1_table)[l1_index], unsigned char) + l2_index * qcow_ctx.l2_entries_size + sizeof(u64), sizeof(SubclusterInfo));
+		mem_cpy(subcluster_info, QCOW_CAST_PTR((qcow_ctx.l1_table)[l1_index], u8) + l2_index * qcow_ctx.l2_entries_size + sizeof(u64), sizeof(SubclusterInfo));
 		if (IS_COMPRESSED_CLUSTER(*img_offset) && *QCOW_CAST_PTR(subcluster_info, u64) != 0) {
 			WARNING_LOG("If the cluster is compressed the subcluster info should be zeroed-out, but found: %llu\n", *QCOW_CAST_PTR(subcluster_info, u64));
 			return -QCOW_USE_OF_RESERVED_FIELD;
@@ -1035,7 +1042,7 @@ static int allocate_l2_table(QCowCtx qcow_ctx, u64 l1_index) {
 	}
 	
 	l2_table_offset &= QCOW_MASK_BITS_INTERVAL(56, 9);
-	QCOW_BE_CONVERT((unsigned char*) &l2_table_offset, sizeof(u64));
+	QCOW_BE_CONVERT((u8*) &l2_table_offset, sizeof(u64));
 	u64 offset = qcow_ctx.l1_table_offset + l1_index * sizeof(u64);
 	if ((err = write_at(qcow_ctx.img_file, offset, &l2_table_offset, sizeof(u64), 1))) {
 		WARNING_LOG("Failed to update the l2 entry.\n");
@@ -1067,7 +1074,7 @@ static int set_lba_at_img_offset(QCowCtx qcow_ctx, u64 offset, u64 new_entry, Su
 	}
 
 	DEBUG_LOG("new_entry: %llX\n", new_entry);
-	mem_cpy(QCOW_CAST_PTR((qcow_ctx.l1_table)[l1_index], unsigned char) + l2_index * qcow_ctx.l2_entries_size, &new_entry, sizeof(u64));
+	mem_cpy(QCOW_CAST_PTR((qcow_ctx.l1_table)[l1_index], u8) + l2_index * qcow_ctx.l2_entries_size, &new_entry, sizeof(u64));
 
 	u64 l2_offset = 0;
 	u64 l1_table_offset = qcow_ctx.l1_table_offset + l1_index * sizeof(u64);
@@ -1087,7 +1094,7 @@ static int set_lba_at_img_offset(QCowCtx qcow_ctx, u64 offset, u64 new_entry, Su
 	
 	if (qcow_ctx.use_extended_l2_entries) {
 		DEBUG_LOG("new_alloc_status: 0x%X, new_reads_as_zero: 0x%X\n", new_subcluster_info.alloc_status, new_subcluster_info.reads_as_zero);
-		mem_cpy(QCOW_CAST_PTR((qcow_ctx.l1_table)[l1_index], unsigned char) + l2_index * qcow_ctx.l2_entries_size + sizeof(u64), &new_subcluster_info, sizeof(SubclusterInfo));
+		mem_cpy(QCOW_CAST_PTR((qcow_ctx.l1_table)[l1_index], u8) + l2_index * qcow_ctx.l2_entries_size + sizeof(u64), &new_subcluster_info, sizeof(SubclusterInfo));
 		QCOW_BE_CONVERT(&new_subcluster_info, sizeof(SubclusterInfo));
 		if (fwrite(&new_subcluster_info, sizeof(SubclusterInfo), 1, qcow_ctx.img_file) != 1) {
 			PERROR_LOG("Failed to update the l2 extended entry.\n");
@@ -1129,7 +1136,7 @@ static inline int find_unallocated_cluster(QCowCtx qcow_ctx, u64* offset) {
 	for (unsigned int refcnt_block = 0; refcnt_block < qcow_ctx.refcount_table_size; ++refcnt_block) {
 		for (unsigned int i = 0; i < qcow_ctx.refcount_block_entries; ++i) {
 			u64 ref_cnt = 0;
-			mem_cpy(&ref_cnt, QCOW_CAST_PTR((qcow_ctx.refcount_table)[refcnt_block], unsigned char) + i, qcow_ctx.refcount_bytes);
+			mem_cpy(&ref_cnt, QCOW_CAST_PTR((qcow_ctx.refcount_table)[refcnt_block], u8) + i, qcow_ctx.refcount_bytes);
 			if (ref_cnt == 0 || (qcow_ctx.refcount_table)[refcnt_block] == NULL) {
 				*offset = i + (refcnt_block * qcow_ctx.cluster_size * qcow_ctx.refcount_block_entries);
 				int err = 0;
@@ -1205,15 +1212,15 @@ static int cow_alloc_cluster(QCowCtx qcow_ctx, u64 offset, u64* cluster_offset) 
 	FILE* file = qcow_ctx.clusters_file;
 	if (qcow_ctx.backing_file && (original_img_offset + clusters_size) <= (u64) qcow_ctx.backing_file_size) file = qcow_ctx.backing_file;
 	
-	unsigned char* cluster_data = (unsigned char*) calloc(clusters_size, sizeof(unsigned char));
-	if ((err = read_at(file, original_img_offset, cluster_data, sizeof(unsigned char), clusters_size)) < 0) {
+	u8* cluster_data = (u8*) calloc(clusters_size, sizeof(u8));
+	if ((err = read_at(file, original_img_offset, cluster_data, sizeof(u8), clusters_size)) < 0) {
 		QCOW_SAFE_FREE(cluster_data);
 		WARNING_LOG("Failed to read the cluster at offset: 0x%llX.\n", offset);
 		return err;
 	}
 	
 	// Copy the data to the newly allocated clusters
-	if ((err = write_at(qcow_ctx.clusters_file, cluster_pos, cluster_data, sizeof(unsigned char), clusters_size)) < 0) {
+	if ((err = write_at(qcow_ctx.clusters_file, cluster_pos, cluster_data, sizeof(u8), clusters_size)) < 0) {
 		QCOW_SAFE_FREE(cluster_data);
 		WARNING_LOG("Failed to copy the cluster data.\n");
 		return err;
@@ -1237,9 +1244,9 @@ static int cow_alloc_cluster(QCowCtx qcow_ctx, u64 offset, u64* cluster_offset) 
 	return QCOW_NO_ERROR;
 }
 
-static int write_compressed_cluster(QCowCtx qcow_ctx, u64 img_offset, unsigned int* recompressed_cluster_size, unsigned int compressed_cluster_size, unsigned char* cluster, unsigned int cluster_data_size) {
+static int write_compressed_cluster(QCowCtx qcow_ctx, u64 img_offset, unsigned int* recompressed_cluster_size, unsigned int compressed_cluster_size, u8* cluster, unsigned int cluster_data_size) {
 	int err = 0;
-	unsigned char* recompressed_cluster = NULL;
+	u8* recompressed_cluster = NULL;
 	if (qcow_ctx.compression_type == DEFLATE) {
 		recompressed_cluster = zlib_deflate(cluster, cluster_data_size, recompressed_cluster_size, &err);
 		if (err) {
@@ -1256,7 +1263,7 @@ static int write_compressed_cluster(QCowCtx qcow_ctx, u64 img_offset, unsigned i
 		return err;
 	}
 
-	if ((err = write_at(qcow_ctx.clusters_file, img_offset, recompressed_cluster, sizeof(unsigned char), *recompressed_cluster_size)) < 0) {
+	if ((err = write_at(qcow_ctx.clusters_file, img_offset, recompressed_cluster, sizeof(u8), *recompressed_cluster_size)) < 0) {
 		QCOW_SAFE_FREE(recompressed_cluster);	
 		return err;
 	}
@@ -1266,7 +1273,7 @@ static int write_compressed_cluster(QCowCtx qcow_ctx, u64 img_offset, unsigned i
 	return QCOW_NO_ERROR;
 }
 
-static int read_compressed_cluster(QCowCtx qcow_ctx, FILE* file, u64* cluster_offset, unsigned char** clusters, unsigned int *cluster_data_size, unsigned int* compressed_clusters_size) {
+static int read_compressed_cluster(QCowCtx qcow_ctx, FILE* file, u64* cluster_offset, u8** clusters, unsigned int *cluster_data_size, unsigned int* compressed_clusters_size) {
 	unsigned int x = 62 - (qcow_ctx.cluster_bits - 8);
 	unsigned int additional_sectors = (*cluster_offset & QCOW_MASK_BITS_INTERVAL(62, x)) >> x;
 	*cluster_offset &= QCOW_MASK_BITS_INTERVAL(x, 0); 
@@ -1274,8 +1281,8 @@ static int read_compressed_cluster(QCowCtx qcow_ctx, FILE* file, u64* cluster_of
 
 	int err = 0;
 	*compressed_clusters_size = qcow_ctx.cluster_size + additional_sectors * 512;
-	unsigned char* compressed_clusters = (unsigned char*) calloc(*compressed_clusters_size, sizeof(unsigned char));
-	if ((err = read_at(file, *cluster_offset, compressed_clusters, sizeof(unsigned char), *compressed_clusters_size)) < 0) {
+	u8* compressed_clusters = (u8*) calloc(*compressed_clusters_size, sizeof(u8));
+	if ((err = read_at(file, *cluster_offset, compressed_clusters, sizeof(u8), *compressed_clusters_size)) < 0) {
 		QCOW_SAFE_FREE(compressed_clusters);
 		WARNING_LOG("Failed to read the compressed cluster.\n");
 	}
@@ -1336,7 +1343,7 @@ int qwrite(const void* data, unsigned int size, size_t nmemb, unsigned int offse
 	}
 
 	if (IS_COMPRESSED_CLUSTER(img_offset)) {
-		unsigned char* cluster = NULL;
+		u8* cluster = NULL;
 		unsigned int cluster_data_size = 0;
 		unsigned int compressed_cluster_size = 0;
 		if ((err = read_compressed_cluster(qcow_ctx, qcow_ctx.clusters_file, &img_offset, &cluster, &cluster_data_size, &compressed_cluster_size)) < 0) {
@@ -1401,7 +1408,7 @@ int qwrite(const void* data, unsigned int size, size_t nmemb, unsigned int offse
 static int read_from_backing_file(void* ptr, size_t size, size_t nmemb, u64 cluster_offset, unsigned int offset, QCowCtx qcow_ctx) {
 	int err = 0;
 	if (IS_COMPRESSED_CLUSTER(cluster_offset)) {
-		unsigned char* cluster = NULL;
+		u8* cluster = NULL;
 		unsigned int cluster_data_size = 0;
 		unsigned int compressed_cluster_size = 0;
 		if ((err = read_compressed_cluster(qcow_ctx, qcow_ctx.backing_file, &cluster_offset, &cluster, &cluster_data_size, &compressed_cluster_size)) < 0) {
@@ -1429,92 +1436,127 @@ static int read_from_backing_file(void* ptr, size_t size, size_t nmemb, u64 clus
 	return QCOW_NO_ERROR;
 }
 
-/// TODO: This function reads at most qcow_ctx.cluster_size bytes
 /// NOTE: the function expects that the ptr has been already allocated, so that it has no responsibility for its de/allocation.
 int qread(void* ptr, size_t size, size_t nmemb, unsigned int offset, QCowCtx qcow_ctx) {
 	int err = 0;
-	u64 ref_cnt = 0;
-	if ((err = get_ref_cnt(qcow_ctx, offset, &ref_cnt)) < 0) return err;
-	DEBUG_LOG("ref_cnt at LBA 0x%X: %llu\n", offset, ref_cnt);
 	
-	if (ref_cnt == 0 && qcow_ctx.backing_file == NULL) {
-		mem_set(ptr, 0, size * nmemb);
-		return QCOW_NO_ERROR;
-	} 
+	const u64 start_cluster = offset / qcow_ctx.cluster_size;
+	const u64 end_cluster   = (offset + size * nmemb) / qcow_ctx.cluster_size;
 	
-	u64 img_offset = 0;
-	SubclusterInfo subcluster_info = {0};
-	if ((err = lba_to_img_offset(qcow_ctx, offset, &img_offset, &subcluster_info)) < 0) return err;
-	IMG_OFFSET_INFO(img_offset);
-	
-	if (ref_cnt == 0 && (img_offset + size * nmemb) <= (u64) qcow_ctx.backing_file_size) {
-		if ((err = read_from_backing_file(ptr, size, nmemb, img_offset, offset, qcow_ctx)) < 0) {
-			WARNING_LOG("Failed to read from the backing file at img_offset: 0x%llX\n", img_offset);
+	for (u64 i = start_cluster, bytes_read = 0; bytes_read < (size * nmemb) && i <= end_cluster; ++i) {
+		const u64 readable_bytes = MIN(size * nmemb - bytes_read, qcow_ctx.cluster_size - (offset % qcow_ctx.cluster_size));
+
+		u64 ref_cnt = 0;
+		if ((err = get_ref_cnt(qcow_ctx, offset, &ref_cnt)) < 0) {
+			WARNING_LOG("An error occurred while fetching the ref_cnt on cluster %llu (traversing clusters: %llu - %llu).\n", i, start_cluster, end_cluster);
 			return err;
 		}
-		return QCOW_NO_ERROR;
-	} else if (ref_cnt == 0) {
-		mem_set(ptr, 0, size * nmemb);
-		return QCOW_NO_ERROR;
-	}
-	
-	if (qcow_ctx.use_extended_l2_entries && !IS_COMPRESSED_CLUSTER(img_offset)) {
-		u64 subcluster_size = qcow_ctx.cluster_size / 32;
-		u64 subcluster_pos = offset % qcow_ctx.cluster_size;
-		u8 subcluster_index = FLOORING(offset % qcow_ctx.cluster_size, subcluster_size);
+
+		DEBUG_LOG("ref_cnt at LBA 0x%X: %llu\n", offset, ref_cnt);
 		
-		if ((subcluster_info.alloc_status >> subcluster_index & 1) && (subcluster_info.reads_as_zero >> subcluster_index & 1)) {
-			WARNING_LOG("Allocation status and reads as zero cannot be both set to 1 for the same subcluster.\n");
-			return -QCOW_INVALID_SUBCLUSTER_BITMAP;
+		if (ref_cnt == 0 && qcow_ctx.backing_file == NULL) {
+			mem_set(QCOW_CAST_PTR(ptr, u8) + bytes_read, 0, readable_bytes);
+			bytes_read += readable_bytes;
+			offset += readable_bytes;
+			continue;
+		} 
+		
+		u64 img_offset = 0;
+		SubclusterInfo subcluster_info = {0};
+
+		err = lba_to_img_offset(qcow_ctx, offset, &img_offset, &subcluster_info);
+		if (-err == QCOW_UNALLOCATED_CLUSTER) {
+			mem_set(QCOW_CAST_PTR(ptr, u8) + bytes_read, 0, readable_bytes);
+			bytes_read += readable_bytes;
+			offset += readable_bytes;
+			continue;
+		} else if (err < 0) {
+			WARNING_LOG("An error occurred while translating the LBA into an image offset on cluster %llu (traversing clusters: %llu - %llu).\n", i, start_cluster, end_cluster);
+			return err;
 		}
 		
-		if ((subcluster_info.alloc_status >> subcluster_index & 1) == 0 || (subcluster_info.reads_as_zero >> subcluster_index & 1)) {
-			if (qcow_ctx.backing_file == NULL && (img_offset + subcluster_pos + size * nmemb) > (u64) qcow_ctx.backing_file_size) {
-				mem_set(ptr, 0, size * nmemb);
-				return QCOW_NO_ERROR;
-			}
-			
+		IMG_OFFSET_INFO(img_offset);
+		
+		if (ref_cnt == 0 && (img_offset + size * nmemb) <= (u64) qcow_ctx.backing_file_size) {
 			if ((err = read_from_backing_file(ptr, size, nmemb, img_offset, offset, qcow_ctx)) < 0) {
 				WARNING_LOG("Failed to read from the backing file at img_offset: 0x%llX\n", img_offset);
 				return err;
 			}
-			
-			return QCOW_NO_ERROR;
+			return size;
+		} else if (ref_cnt == 0) {
+			mem_set(QCOW_CAST_PTR(ptr, u8) + bytes_read, 0, readable_bytes);
+			bytes_read += readable_bytes;
+			offset += readable_bytes;
+			continue;
 		}
-	}
-	
-	if (IS_COMPRESSED_CLUSTER(img_offset)) {
-		unsigned char* cluster = NULL;
-		unsigned int cluster_data_size = 0;
-		unsigned int compressed_cluster_size = 0;
-		if ((err = read_compressed_cluster(qcow_ctx, qcow_ctx.clusters_file, &img_offset, &cluster, &cluster_data_size, &compressed_cluster_size)) < 0) {
-			WARNING_LOG("Failed to read compressed cluster at img_offset: 0x%llX\n", img_offset);
+		
+		if (qcow_ctx.use_extended_l2_entries && !IS_COMPRESSED_CLUSTER(img_offset)) {
+			u64 subcluster_size = qcow_ctx.cluster_size / 32;
+			u64 subcluster_pos = offset % qcow_ctx.cluster_size;
+			u8 subcluster_index = FLOORING(offset % qcow_ctx.cluster_size, subcluster_size);
+			
+			if ((subcluster_info.alloc_status >> subcluster_index & 1) && (subcluster_info.reads_as_zero >> subcluster_index & 1)) {
+				WARNING_LOG("Allocation status and reads as zero cannot be both set to 1 for the same subcluster.\n");
+				return -QCOW_INVALID_SUBCLUSTER_BITMAP;
+			}
+			
+			if ((subcluster_info.alloc_status >> subcluster_index & 1) == 0 || (subcluster_info.reads_as_zero >> subcluster_index & 1)) {
+				if (qcow_ctx.backing_file == NULL && (img_offset + subcluster_pos + readable_bytes) > (u64) qcow_ctx.backing_file_size) {
+					mem_set(QCOW_CAST_PTR(ptr, u8) + bytes_read, 0, readable_bytes);
+					bytes_read += readable_bytes;
+					offset += readable_bytes;
+					continue;
+				}
+				
+				if ((err = read_from_backing_file(QCOW_CAST_PTR(ptr, u8) + bytes_read, readable_bytes, 1, img_offset, offset, qcow_ctx)) < 0) {
+					WARNING_LOG("Failed to read from the backing file at img_offset: 0x%llX\n", img_offset);
+					return err;
+				}
+				
+				bytes_read += readable_bytes;
+				offset += readable_bytes;
+				continue;
+			}
+		}
+		
+		if (IS_COMPRESSED_CLUSTER(img_offset)) {
+			u8* cluster = NULL;
+			unsigned int cluster_data_size = 0;
+			unsigned int compressed_cluster_size = 0;
+			if ((err = read_compressed_cluster(qcow_ctx, qcow_ctx.clusters_file, &img_offset, &cluster, &cluster_data_size, &compressed_cluster_size)) < 0) {
+				WARNING_LOG("Failed to read compressed cluster at img_offset: 0x%llX\n", img_offset);
+				return err;
+			}
+			
+			mem_cpy(QCOW_CAST_PTR(ptr, u8) + bytes_read, cluster + (offset % cluster_data_size), readable_bytes);
+			QCOW_SAFE_FREE(cluster);
+			
+			bytes_read += readable_bytes;
+			offset += readable_bytes;
+			continue;	
+		} 
+
+		if (((img_offset & QCOW_MASK_BITS_INTERVAL(62, 56)) != 0) || ((img_offset & QCOW_MASK_BITS_INTERVAL(9, 0)) != 0)) {
+			WARNING_LOG("Use of reserved field in l2 entry.\n");
+			return -QCOW_USE_OF_RESERVED_FIELD;
+		} else if ((img_offset & QCOW_MASK_BITS_INTERVAL(56, 9)) == 0 && ((img_offset >> 63) & 1) == 0 && !qcow_ctx.use_erdf) {
+			mem_set(QCOW_CAST_PTR(ptr, u8) + bytes_read, 0, readable_bytes);
+			bytes_read += readable_bytes;
+			offset += readable_bytes;
+			continue;
+		}
+
+		img_offset = (img_offset & QCOW_MASK_BITS_INTERVAL(56, 9)) + (offset % qcow_ctx.cluster_size);
+		if ((err = read_at(qcow_ctx.clusters_file, img_offset, QCOW_CAST_PTR(ptr, u8) + bytes_read, readable_bytes, 1)) < 0) {
+			WARNING_LOG("Failed to read from the qcow image.\n");
 			return err;
 		}
-		
-		const u64 read_size = MIN(cluster_data_size - (offset % cluster_data_size), size * nmemb);
-		mem_cpy(ptr, cluster + (offset % cluster_data_size), read_size);
-		QCOW_SAFE_FREE(cluster);
-		
-		/* return read_size; */	
-		return QCOW_NO_ERROR;
-	} 
-
-	if (((img_offset & QCOW_MASK_BITS_INTERVAL(62, 56)) != 0) || ((img_offset & QCOW_MASK_BITS_INTERVAL(9, 0)) != 0)) {
-		WARNING_LOG("Use of reserved field in l2 entry.\n");
-		return -QCOW_USE_OF_RESERVED_FIELD;
-	} else if ((img_offset & QCOW_MASK_BITS_INTERVAL(56, 9)) == 0 && ((img_offset >> 63) & 1) == 0 && !qcow_ctx.use_erdf) {
-		mem_set(ptr, 0, size * nmemb);
-		return QCOW_NO_ERROR;
-	}
-
-	img_offset = (img_offset & QCOW_MASK_BITS_INTERVAL(56, 9)) + (offset % qcow_ctx.cluster_size);
-	if ((err = read_at(qcow_ctx.clusters_file, img_offset, ptr, size, nmemb)) < 0) {
-		WARNING_LOG("Failed to read from the qcow image.\n");
-		return err;
+	
+		offset += readable_bytes;
+		bytes_read += readable_bytes;
 	}
 	
-	return QCOW_NO_ERROR; 
+	return QCOW_NO_ERROR;
 }
 
 #endif // _QCOW_PARSER_H_

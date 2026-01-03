@@ -90,9 +90,6 @@ typedef struct {
 	};
 } partition_t;
 
-/// Static Variables
-static QCowCtx qcow_ctx = {0};
-
 // Utility Functions
 static inline void print_guid(const guid_t g) {
     printf(
@@ -129,27 +126,13 @@ static int get_n_sector_at(const unsigned int at, const unsigned int cnt, void* 
 	int err = 0;
 	u64 offset = at * SECTOR_SIZE;
 	u64 size = cnt * SECTOR_SIZE;
-	if ((err = qread(data, sizeof(u8), size, offset, qcow_ctx)) < 0) {
+	if ((err = qread(data, sizeof(u8), size, offset, default_qcow_ctx)) < 0) {
 		WARNING_LOG("Failed to read %llu bytes at LBA 0x%llX, ret: %d - '%s'\n", size, offset, err, qcow_errors_str[-err]);
 		return err;
 	}
 
 	if (err > 0) DEBUG_LOG("Read %d bytes out of requested %llu.\n", err, size);
 
-	return QCOW_NO_ERROR;
-}
-
-#define deinit_qcow_part() deinit_qcow(&qcow_ctx)
-static int init_qcow_part(const char* qcow_path) {
-	if (qcow_path == NULL) return -QCOW_INVALID_PARAMETERS;
-	
-	int err = 0;
-	mem_set(&qcow_ctx, 0, sizeof(QCowCtx));
-	if ((err = init_qcow(&qcow_ctx, qcow_path)) < 0) {
-		WARNING_LOG("Failed to parse the qcow image, err: %d - '%s'.\n", err, qcow_errors_str[-err]);
-		return err;
-	}
-	
 	return QCOW_NO_ERROR;
 }
 
@@ -417,7 +400,7 @@ static int parse_part_scheme(const u8* first_sector, const PartitionScheme parti
 	
 	// Retrieve last LBA
 	u8 last_sector[SECTOR_SIZE] = {0};
-	if (get_sector_at((qcow_ctx.size / SECTOR_SIZE) - 1, last_sector) < 0) {
+	if (get_sector_at((default_qcow_ctx.size / SECTOR_SIZE) - 1, last_sector) < 0) {
 		WARNING_LOG("Failed to retrieve last sector from given qcow file.\n");
 		return -QCOW_IO_ERROR;
 	}

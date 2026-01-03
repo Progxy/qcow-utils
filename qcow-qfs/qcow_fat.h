@@ -326,7 +326,6 @@ static int parse_fat_tables(qfs_fat_t* qfs_fat) {
 			return -QCOW_IO_ERROR;
 		}
 
-		DEBUG_LOG("table_size: %llu - %llu\n", qfs_fat -> fat_table_size, qfs_fat -> fat_table_size / SECTOR_SIZE);
 		const u64 fat_region_offset = (qfs_fat -> bpb_sector.rsv_sectors_cnt * qfs_fat -> bpb_sector.bytes_per_sector + j * qfs_fat -> fat_table_size) / SECTOR_SIZE;
 		if (get_n_sector_at(qfs_fat -> start_lba + fat_region_offset, qfs_fat -> fat_table_size / SECTOR_SIZE, qfs_fat -> fat_tables[j])) {
 			for (u8 z = 0; z <= j; ++z) QCOW_SAFE_FREE((qfs_fat -> fat_tables)[z]);
