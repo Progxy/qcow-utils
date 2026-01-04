@@ -141,6 +141,7 @@ typedef struct {
 	u64 start_lba;
 } qfs_fat_t;
 
+// Utility Functions
 static inline u64 first_sector_of_cluster_n(const qfs_fat_t* qfs_fat, u64 n) {
 	u64 first_data_sector = (qfs_fat -> bpb_sector.rsv_sectors_cnt * qfs_fat -> bpb_sector.bytes_per_sector + qfs_fat -> bpb_sector.num_fat * qfs_fat -> fat_table_size) / SECTOR_SIZE;
 	return ((n - 2) * qfs_fat -> cluster_size / SECTOR_SIZE) + first_data_sector;

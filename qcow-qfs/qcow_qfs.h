@@ -26,12 +26,13 @@
 #include "../qcow-part/qcow_part.h"
 #include "./qcow_fat.h"
 #include "./qcow_ext4.h"
+#include "./qcow_btrfs.h"
 
 typedef enum { MAX_QFS_NAME = 256 } QFSConstants;
 typedef enum { QFS_DIRECTORY = 0x01, QFS_FILE = 0x02 } QFSNodeType;
 typedef enum { QFS_IRW = 0x04 } QFSMode;
 typedef enum { QFS_SEEK_SET = 0, QFS_SEEK_CUR, QFS_SEEK_END } QFSWhence;
-typedef enum { QFS_FAT = 0, QFS_EXT4 = 1 } QFSType;
+typedef enum { QFS_FAT = 0, QFS_EXT4, QFS_BTRFS } QFSType;
 
 typedef struct {
 	u16 year;
@@ -82,27 +83,16 @@ typedef struct {
 	char name[MAX_QFS_NAME];
 } qfs_stat_t;
 
-#define RECENT_NODES_CNT 16
+// TODO: Maybe should also add the qfs_node_t cwd
 typedef struct {
 	QFSType qfs_type;
 	qfs_node_t root;
-	// TODO: Maybe should also add the qfs_node_t cwd
-	
 	union {
 		qfs_fat_t  qfs_fat;
 		qfs_ext4_t qfs_ext4;
+		qfs_btrfs_t qfs_btrfs;
 	};
-} qfs_ctx;
-
-typedef qfs_ctx qfs_t;
-
-// TODO: For when start supporting multiple QFS, the common and a union of ctxs should
-// be put here
-/* typedef struct { */
-/* 	u64 start_lba; */
-/* 	/1* QFSType qfs_type; *1/ */
-/* 	qfs_ctx* qfs_ctx; */
-/* } qfs_t; */
+} qfs_t;
 
 // Utilities Functions
 static void print_attr(const u8 attr) {
@@ -237,15 +227,27 @@ int qfs_mount(const partition_t partition, qfs_t* qfs) {
 		return err;
 	} 
 	
-	err = parse_ext4_fs(&(qfs -> qfs_ext4));
+	mem_set(&(qfs -> qfs_fat), 0, sizeof(qfs_fat_t));
+	/* qfs -> qfs_ext4.start_lba = partition.start_lba; */
+	/* err = parse_ext4_fs(&(qfs -> qfs_ext4)); */
+	/* if (err == 0) { */
+	/* 	qfs -> qfs_type = QFS_EXT4; */
+	/* 	DEBUG_LOG("Partition successfully mounted.\n"); */
+	/* 	return QCOW_NO_ERROR; */
+	/* } else if (err < 0) { */
+	/* 	WARNING_LOG("Failed to parse the EXT4 partition.\n"); */
+	/* 	return err; */
+	/* } */ 
+	
+	mem_set(&(qfs -> qfs_ext4), 0, sizeof(qfs_ext4_t));
+	qfs -> qfs_btrfs.start_lba = partition.start_lba;
+	err = parse_btrfs_fs(&(qfs -> qfs_btrfs));
 	if (err == 0) {
-		qfs -> qfs_type = QFS_EXT4;
-		
+		qfs -> qfs_type = QFS_BTRFS;
 		DEBUG_LOG("Partition successfully mounted.\n");
-		
 		return QCOW_NO_ERROR;
 	} else if (err < 0) {
-		WARNING_LOG("Failed to parse the EXT4 partition.\n");
+		WARNING_LOG("Failed to parse the BTRFS partition.\n");
 		return err;
 	} 
 	

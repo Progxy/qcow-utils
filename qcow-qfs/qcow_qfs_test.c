@@ -143,8 +143,34 @@ int test_file(qfs_t* qfs) {
 	return QCOW_NO_ERROR;
 }
 
+int test_mount_partition(const partition_t partition) {
+	int err = 0;
+	qfs_t qfs = {0};
+	if ((err = qfs_mount(partition, &qfs)) < 0) {
+		WARNING_LOG("Failed to mount partition, because: %s\n", qcow_errors_str[-err]);
+		return 1;
+	}
+	
+	if ((err = test_dir_stat(&qfs)) < 0) {
+		WARNING_LOG("Failed testing dir and stat functionality.\n");
+		return 1;
+	}
+
+	if ((err = test_file(&qfs)) < 0) {
+		WARNING_LOG("Failed testing file functionality.\n");
+		return 1;
+	}
+
+	qfs_unmount(&qfs);
+	
+	return QCOW_NO_ERROR;
+}
+
 int main(void) {
-	if (init_default_qcow("../Arch-Linux-x86_64-basic.qcow2")) {
+
+	/* if (init_default_qcow("../Arch_Linux.qcow2")) { */
+	/* if (init_default_qcow("../Arch-Linux-x86_64-basic.qcow2")) { */
+	if (init_default_qcow("../Arch-Linux-x86_64-basic-20260101.476437.qcow2")) {
 		WARNING_LOG("Failed to init qcow_part.\n");
 		return 1;
 	}
@@ -153,34 +179,27 @@ int main(void) {
 	partition_t* partitions = NULL;
 	unsigned int partitions_cnt = 0;
 	if ((err = parse_partitions(&partitions, &partitions_cnt)) < 0) {
+		deinit_default_qcow();
 		WARNING_LOG("Failed to parse the partitions, because: %s.\n", qcow_errors_str[-err]);
-		deinit_default_qcow();
 		return 1;
 	}
 	
-	const partition_t fat_partition = partitions[2];
+	const partition_t fat_partition  = partitions[1];
+	const partition_t btrfs_partition = partitions[2];
 	QCOW_SAFE_FREE(partitions);
+	
+	/* if ((err = test_mount_partition(fat_partition)) < 0) { */
+	/* 	deinit_default_qcow(); */
+	/* 	WARNING_LOG("Failed to test mount the partition.\n"); */
+	/* 	return 1; */
+	/* } */
 
-	qfs_t qfs = {0};
-	if ((err = qfs_mount(fat_partition, &qfs)) < 0) {
+	if ((err = test_mount_partition(btrfs_partition)) < 0) {
 		deinit_default_qcow();
-		WARNING_LOG("Failed to mount partition, because: %s\n", qcow_errors_str[-err]);
+		WARNING_LOG("Failed to test mount the partition.\n");
 		return 1;
 	}
 	
-	if ((err = test_dir_stat(&qfs)) < 0) {
-		deinit_default_qcow();
-		WARNING_LOG("Failed testing dir and stat functionality.\n");
-		return 1;
-	}
-
-	if ((err = test_file(&qfs)) < 0) {
-		deinit_default_qcow();
-		WARNING_LOG("Failed testing file functionality.\n");
-		return 1;
-	}
-
-	qfs_unmount(&qfs);
 	deinit_default_qcow();
 
 	return 0;

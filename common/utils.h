@@ -27,11 +27,21 @@ typedef unsigned short int u16;
 typedef unsigned int       u32;
 typedef unsigned long long u64;
 
+typedef char      s8;
+typedef short int s16;
+typedef int       s32;
+typedef long long s64;
+
 #define STATIC_ASSERT          _Static_assert
 STATIC_ASSERT(sizeof(u8)   == 1,  "u8  must be 1 bytes");
 STATIC_ASSERT(sizeof(u16)  == 2,  "u16 must be 2 bytes");
 STATIC_ASSERT(sizeof(u32)  == 4,  "u32 must be 4 bytes");
 STATIC_ASSERT(sizeof(u64)  == 8,  "u64 must be 8 bytes");
+
+STATIC_ASSERT(sizeof(s8)   == 1,  "s8  must be 1 bytes");
+STATIC_ASSERT(sizeof(s16)  == 2,  "s16 must be 2 bytes");
+STATIC_ASSERT(sizeof(s32)  == 4,  "s32 must be 4 bytes");
+STATIC_ASSERT(sizeof(s64)  == 8,  "s64 must be 8 bytes");
 
 #endif //_QCOW_SPECIAL_TYPE_SUPPORT_
 
