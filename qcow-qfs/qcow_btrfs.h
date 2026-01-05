@@ -2,24 +2,26 @@
 #define _QCOW_BTRFS_H_
 
 typedef enum {
-	BTRFS_SUPERBLOCK_OFFSET        = 128,
-	BTRFS_NUM_BACKUP_ROOTS         = 4,
-	BTRFS_MAX_SYS_CHUNK_ARRAY_SIZE = 0x800,
-	BTRFS_MAX_LEVEL                = 8,
-	BTRFS_OLD                      = 0,
-	BTRFS_MIXED                    = 1,
-	BTRFS_LEAF_NODE                = 0,
-	BTRFS_TIME_SIZE                = 0x0C,
-	BTRFS_KEY_SIZE                 = 0x11,
-	DEV_ITEM_SIZE                  = 0x62,
-	BTRFS_CHUNK_ITEM_SIZE          = 0x30,
-	BTRFS_STRIPE_SIZE              = 0x20,
-	BTRFS_ROOT_BACKUP_SIZE         = 0xA8,
-	BTRFS_SUPERBLOCK_SIZE          = 0x1000,
-	BTRFS_NODE_HEADER_SIZE         = 0x65,
-	BTRFS_INTERNAL_NODE_SIZE       = 0x21,
-	BTRFS_LEAF_NODE_SIZE           = 0x19,
-	BTRFS_SUPERBLOCK_CSUM_OFFSET   = 0x20
+	BTRFS_SUPERBLOCK_LOGICAL_OFFSET = 0x10000,
+	BTRFS_SUPERBLOCK_OFFSET         = 128,
+	BTRFS_NUM_BACKUP_ROOTS          = 4,
+	BTRFS_MAX_SYS_CHUNK_ARRAY_SIZE  = 0x800,
+	BTRFS_MAX_LEVEL                 = 8,
+	BTRFS_OLD                       = 0,
+	BTRFS_MIXED                     = 1,
+	BTRFS_LEAF_NODE                 = 0,
+	BTRFS_TIME_SIZE                 = 0x0C,
+	BTRFS_KEY_SIZE                  = 0x11,
+	DEV_ITEM_SIZE                   = 0x62,
+	BTRFS_CHUNK_ITEM_SIZE           = 0x30,
+	BTRFS_STRIPE_SIZE               = 0x20,
+	BTRFS_ROOT_BACKUP_SIZE          = 0xA8,
+	BTRFS_SUPERBLOCK_SIZE           = 0x1000,
+	BTRFS_NODE_HEADER_SIZE          = 0x65,
+	BTRFS_INTERNAL_NODE_SIZE        = 0x21,
+	BTRFS_LEAF_NODE_SIZE            = 0x19,
+	BTRFS_SUPERBLOCK_CSUM_OFFSET    = 0x20,
+	BTRFS_MAX_NODE_SIZE             = 65536
 } QCowBtrfsConstants;
 
 typedef enum {
@@ -227,16 +229,16 @@ typedef struct PACKED_STRUCT {
 } btrfs_leaf_node_t;
 
 // Validate Structs Sizes
-STATIC_ASSERT(sizeof(btrfs_time_t)          == 0x0C,   "BTRFS time size mismatch");
-STATIC_ASSERT(sizeof(btrfs_key_t)           == 0x11,   "BTRFS key size mismatch");
-STATIC_ASSERT(sizeof(dev_item_t)            == 0x62,   "DEV_ITEM size mismatch");
-STATIC_ASSERT(sizeof(btrfs_chunk_item_t)    == 0x30,   "BTRFS Chunk Item size mismatch");
-STATIC_ASSERT(sizeof(btrfs_stripe_t)        == 0x20,   "BTRFS Stripe size mismatch");
-STATIC_ASSERT(sizeof(btrfs_root_backup_t)   == 0xA8,   "BTRFS Root Backup size mismatch");
-STATIC_ASSERT(sizeof(btrfs_superblock_t)    == 0x1000, "BTRFS SuperBlock size mismatch");
-STATIC_ASSERT(sizeof(btrfs_node_header_t)   == 0x65,   "BTRFS Node Header size mismatch");
-STATIC_ASSERT(sizeof(btrfs_internal_node_t) == 0x21,   "BTRFS Internal Node size mismatch");
-STATIC_ASSERT(sizeof(btrfs_leaf_node_t)     == 0x19,   "BTRFS Leaf Node size mismatch");
+STATIC_ASSERT(sizeof(btrfs_time_t)          == BTRFS_TIME_SIZE,          "BTRFS time size mismatch");
+STATIC_ASSERT(sizeof(btrfs_key_t)           == BTRFS_KEY_SIZE,           "BTRFS key size mismatch");
+STATIC_ASSERT(sizeof(dev_item_t)            == DEV_ITEM_SIZE,            "DEV_ITEM size mismatch");
+STATIC_ASSERT(sizeof(btrfs_chunk_item_t)    == BTRFS_CHUNK_ITEM_SIZE,    "BTRFS Chunk Item size mismatch");
+STATIC_ASSERT(sizeof(btrfs_stripe_t)        == BTRFS_STRIPE_SIZE,        "BTRFS Stripe size mismatch");
+STATIC_ASSERT(sizeof(btrfs_root_backup_t)   == BTRFS_ROOT_BACKUP_SIZE,   "BTRFS Root Backup size mismatch");
+STATIC_ASSERT(sizeof(btrfs_superblock_t)    == BTRFS_SUPERBLOCK_SIZE,    "BTRFS SuperBlock size mismatch");
+STATIC_ASSERT(sizeof(btrfs_node_header_t)   == BTRFS_NODE_HEADER_SIZE,   "BTRFS Node Header size mismatch");
+STATIC_ASSERT(sizeof(btrfs_internal_node_t) == BTRFS_INTERNAL_NODE_SIZE, "BTRFS Internal Node size mismatch");
+STATIC_ASSERT(sizeof(btrfs_leaf_node_t)     == BTRFS_LEAF_NODE_SIZE,     "BTRFS Leaf Node size mismatch");
 
 // Utility Functions
 static void print_compat_ro_feature(BtrfsFlags btrfs_flag) {
@@ -411,6 +413,31 @@ static void print_btrfs_superblock(const btrfs_superblock_t* superblock) {
 	return;
 }
 
+static int check_sys_chunk_array_size(const u8* sys_chunk_array, const u32 sys_chunk_array_size) {
+	if (sys_chunk_array_size > BTRFS_MAX_SYS_CHUNK_ARRAY_SIZE) {
+		WARNING_LOG("The sys chunk array size exceeds the max sys chunk array size: 0x%X > 0x%X\n", sys_chunk_array_size, BTRFS_MAX_SYS_CHUNK_ARRAY_SIZE);
+		return -QCOW_INVALID_SYS_CHUNK_ARRAY_SIZE;
+	}
+
+	u32 bytes_cnt = 0;
+	for (u32 j = 0; bytes_cnt < sys_chunk_array_size && bytes_cnt < BTRFS_MAX_SYS_CHUNK_ARRAY_SIZE; ++j) {
+		bytes_cnt += sizeof(btrfs_key_t);
+		btrfs_chunk_item_t* chunk_item = QCOW_CAST_PTR(sys_chunk_array + bytes_cnt, btrfs_chunk_item_t);
+		bytes_cnt += sizeof(btrfs_chunk_item_t) + sizeof(btrfs_stripe_t) * chunk_item -> num_stripes;
+		if (bytes_cnt > sys_chunk_array_size) {
+			WARNING_LOG("bytes_cnt exceeds the sys chunk array size: 0x%X > 0x%X\n", bytes_cnt, sys_chunk_array_size);
+			return -QCOW_INVALID_SYS_CHUNK_ARRAY_SIZE;
+		}
+	}
+	
+	if (bytes_cnt != sys_chunk_array_size) {
+		WARNING_LOG("bytes_cnt mismatch the sys chunk array size: 0x%X != 0x%X\n", bytes_cnt, sys_chunk_array_size);
+		return -QCOW_INVALID_SYS_CHUNK_ARRAY_SIZE;
+	}
+
+	return QCOW_NO_ERROR;
+}
+
 static int validate_superblock(btrfs_superblock_t* superblock) {
 	// Check the CSUM of the superblock
 	if (superblock -> csum_type != BTRFS_CRC32C) {
@@ -427,11 +454,69 @@ static int validate_superblock(btrfs_superblock_t* superblock) {
 		return -QCOW_INVALID_CRC_CHECKSUM;
 	}
 	
-
 	// Ensure that the magic is correct
 	if (mem_n_cmp(superblock -> magic, btrfs_magic, sizeof(superblock -> magic))) {
+		WARNING_LOG("Invalid magic: '%.*s'\n", (int) sizeof(superblock -> magic), superblock -> magic);
 		return -QCOW_INVALID_BTRFS_MAGIC;
 	}
+
+	if (superblock -> physical_address != BTRFS_SUPERBLOCK_LOGICAL_OFFSET) {
+		WARNING_LOG("Mismatch physical address: %llX != %X\n", superblock -> physical_address, BTRFS_SUPERBLOCK_LOGICAL_OFFSET);
+		return -QCOW_INVALID_SUPERBLOCK_PHYSICAL_ADDRESS;
+	}
+
+	if (superblock -> sector_size % 2 || superblock -> sector_size > superblock -> node_size || superblock -> sector_size > superblock -> stripe_size) {
+		WARNING_LOG("Invalid sector size: 0x%X\n", superblock -> sector_size);
+		return -QCOW_INVALID_SIZE;
+	} else if (superblock -> node_size % 2 || superblock -> node_size > BTRFS_MAX_NODE_SIZE) {
+		WARNING_LOG("Invalid node size: 0x%X\n", superblock -> node_size);
+		return -QCOW_INVALID_SIZE;
+	} else if (superblock -> stripe_size % 2) {
+		WARNING_LOG("Invalid stripe size: 0x%X\n", superblock -> stripe_size);
+		return -QCOW_INVALID_SIZE;
+	}
+
+	if (superblock -> root_level > BTRFS_MAX_LEVEL) {
+		WARNING_LOG("Invalid root level: %X\n", superblock -> root_level);
+		return -QCOW_INVALID_LEVEL;
+	} else if (superblock -> chunk_root_level > BTRFS_MAX_LEVEL) {
+		WARNING_LOG("Invalid chunk root level: %X\n", superblock -> chunk_root_level);
+		return -QCOW_INVALID_LEVEL;
+	} else if (superblock -> log_root_level > BTRFS_MAX_LEVEL) {
+		WARNING_LOG("Invalid log root level: %X\n", superblock -> log_root_level);
+		return -QCOW_INVALID_LEVEL;
+	}
+
+	if (superblock -> root_tree_root_lba % superblock -> sector_size) {
+		WARNING_LOG("Root Tree Root LBA must be aligned to sector.\n");
+		return -QCOW_UNALIGNED_SECTOR;
+	} else if (superblock -> chunk_tree_root_lba % superblock -> sector_size) {
+		WARNING_LOG("Chunk Tree Root LBA must be aligned to sector.\n");
+		return -QCOW_UNALIGNED_SECTOR;
+	} else if (superblock -> log_tree_root_lba % superblock -> sector_size) {
+		WARNING_LOG("Log Tree Root LBA must be aligned to sector.\n");
+		return -QCOW_UNALIGNED_SECTOR;
+	}
+
+	if (superblock -> generation == 0x00) {
+		WARNING_LOG("Invalid generation: %llX\n", superblock -> generation);
+		return -QCOW_INVALID_GENERATION;
+	} else if (superblock -> chunk_root_generation == 0x00) {
+		WARNING_LOG("Invalid chunk root generation: %llX\n", superblock -> chunk_root_generation);
+		return -QCOW_INVALID_GENERATION;
+	}
+
+	if (superblock -> num_devices == 0x00) {
+		WARNING_LOG("Invalid num devices: 0x%llX\n", superblock -> num_devices);
+		return -QCOW_INVALID_NUM_DEVICES;
+	}
+
+	if (check_sys_chunk_array_size(superblock -> sys_chunk_array, superblock -> sys_chunk_array_size)) {
+		WARNING_LOG("Invalid sys chunk array size: 0x%X\n", superblock -> sys_chunk_array_size);
+		return -QCOW_INVALID_SYS_CHUNK_ARRAY_SIZE;
+	}
+
+	// TODO: Validate the btrfs root backups ?? 
 
 	return QCOW_NO_ERROR;
 }
