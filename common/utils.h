@@ -277,6 +277,12 @@ UNUSED_FUNCTION static void trim_str(char* str) {
 	return;
 }
 
+UNUSED_FUNCTION static inline u64 align(const u64 val, const u64 alignment) {
+	if (val % alignment == 0) return val;
+	return val + (val % alignment);
+}
+
+
 #endif //_QCOW_UTILS_IMPLEMENTATION_
 
 // -------

@@ -28,7 +28,7 @@
 #include "./qcow_ext4.h"
 #include "./qcow_btrfs.h"
 
-typedef enum { MAX_QFS_NAME = 256 } QFSConstants;
+typedef enum { QFS_MAX_NAME = 256 } QFSConstants;
 typedef enum { QFS_DIRECTORY = 0x01, QFS_FILE = 0x02 } QFSNodeType;
 typedef enum { QFS_IRW = 0x04 } QFSMode;
 typedef enum { QFS_SEEK_SET = 0, QFS_SEEK_CUR, QFS_SEEK_END } QFSWhence;
@@ -44,7 +44,7 @@ typedef struct {
 } qfs_time_t;
 
 typedef struct qfs_node_t {
-	char name[MAX_QFS_NAME];
+	char name[QFS_MAX_NAME];
 	QFSNodeType node_type;
 	union {
 		fat_node_t fat_node;
@@ -71,16 +71,16 @@ typedef struct {
 
 typedef struct {
 	QFSNodeType node_type;
-	char name[MAX_QFS_NAME];
+	char name[QFS_MAX_NAME];
 } qfs_dirent_t;
 
 typedef struct {
-	u32 size;                    // File size in bytes
-    u32 mode;                    // Type + permissions
-    qfs_time_t acc_time;          // Access time
-    qfs_time_t mod_time;          // Modification time
-    qfs_time_t create_time;       // Creation time
-	char name[MAX_QFS_NAME];
+	u32 size;                // File size in bytes
+    u32 mode;                // Type + permissions
+    qfs_time_t acc_time;     // Access time
+    qfs_time_t mod_time;     // Modification time
+    qfs_time_t create_time;  // Creation time
+	char name[QFS_MAX_NAME];
 } qfs_stat_t;
 
 // TODO: Maybe should also add the qfs_node_t cwd
@@ -218,9 +218,9 @@ int qfs_mount(const partition_t partition, qfs_t* qfs) {
 		qfs -> root.fat_node.attr = FAT_ATTR_VOLUME_ID | FAT_ATTR_DIRECTORY | FAT_ATTR_READ_ONLY;
 		qfs -> root.node_type = QFS_DIRECTORY;
 		(qfs -> root.name)[0]  = '/';
-
-		DEBUG_LOG("Partition successfully mounted.\n");
 		
+		DEBUG_LOG("Partition successfully mounted.\n");
+	
 		return QCOW_NO_ERROR;
 	} else if (-err == QCOW_IO_ERROR) {
 		WARNING_LOG("Failed to parse the FAT partition.\n");
@@ -228,18 +228,6 @@ int qfs_mount(const partition_t partition, qfs_t* qfs) {
 	} 
 	
 	mem_set(&(qfs -> qfs_fat), 0, sizeof(qfs_fat_t));
-	/* qfs -> qfs_ext4.start_lba = partition.start_lba; */
-	/* err = parse_ext4_fs(&(qfs -> qfs_ext4)); */
-	/* if (err == 0) { */
-	/* 	qfs -> qfs_type = QFS_EXT4; */
-	/* 	DEBUG_LOG("Partition successfully mounted.\n"); */
-	/* 	return QCOW_NO_ERROR; */
-	/* } else if (err < 0) { */
-	/* 	WARNING_LOG("Failed to parse the EXT4 partition.\n"); */
-	/* 	return err; */
-	/* } */ 
-	
-	mem_set(&(qfs -> qfs_ext4), 0, sizeof(qfs_ext4_t));
 	qfs -> qfs_btrfs.start_lba = partition.start_lba;
 	err = parse_btrfs_fs(&(qfs -> qfs_btrfs));
 	if (err == 0) {
@@ -248,6 +236,18 @@ int qfs_mount(const partition_t partition, qfs_t* qfs) {
 		return QCOW_NO_ERROR;
 	} else if (err < 0) {
 		WARNING_LOG("Failed to parse the BTRFS partition.\n");
+		return err;
+	} 
+	
+	mem_set(&(qfs -> qfs_btrfs), 0, sizeof(qfs_btrfs_t));
+	qfs -> qfs_ext4.start_lba = partition.start_lba;
+	err = parse_ext4_fs(&(qfs -> qfs_ext4));
+	if (err == 0) {
+		qfs -> qfs_type = QFS_EXT4;
+		DEBUG_LOG("Partition successfully mounted.\n");
+		return QCOW_NO_ERROR;
+	} else if (err < 0) {
+		WARNING_LOG("Failed to parse the EXT4 partition.\n");
 		return err;
 	} 
 	

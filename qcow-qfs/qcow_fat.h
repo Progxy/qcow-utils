@@ -24,9 +24,9 @@ typedef enum { FAT12 = 0, FAT16 = 1, FAT32 = 2, NOT_FAT = 3 } FatType;
 const char* fat_type_str[] = { "FAT12", "FAT16", "FAT32", "NOT_FAT" };
 
 typedef enum { 
-	CLNSHUTBITMASK          = 0x08000000,
-	HRDERRBITMASK           = 0x04000000,
-	MAX_FAT_NAME            = 256,
+	FAT_CLNSHUTBITMASK      = 0x08000000,
+	FAT_HRDERRBITMASK       = 0x04000000,
+	FAT_MAX_NAME            = 256,
 	FAT_SIGNATURE           = 0xAA55,
 	FAT_ATTR_READ_ONLY      = 0x01,
 	FAT_ATTR_HIDDEN         = 0x02,
@@ -41,7 +41,10 @@ typedef enum {
 	FAT_END_OF_CHAIN        = 0x0FFFFFF8,
 	FAT_BAD_CLUSTER         = 0x0FFFFFF7,
 	FAT_FREE_CLUSTER        = 0x00,
-	FAT_LFN_LAST_ENTRY_MASK = 0x40
+	FAT_LFN_LAST_ENTRY_MASK = 0x40,
+	FAT_BPB_SECTOR_SIZE     = 512,
+	FAT_DIR_ENTRY_SIZE      = 32,
+	FAT_LFN_ENTRY_SIZE      = 32,
 } QCowFatConstants;
 
 typedef struct PACKED_STRUCT {
@@ -118,9 +121,9 @@ typedef struct PACKED_STRUCT {
     u16 name3[2];         // 0x1C: UTF-16 chars (12–13)
 } fat_lfn_entry_t;
 
-STATIC_ASSERT(sizeof(bpb_sector_t)    == 512, "BPB size mismatch");
-STATIC_ASSERT(sizeof(fat_dir_entry_t) == 32,  "FAT dir entry size mismatch");
-STATIC_ASSERT(sizeof(fat_lfn_entry_t) == 32,  "FAT LFN entry size mismatch");
+STATIC_ASSERT(sizeof(bpb_sector_t)    == FAT_BPB_SECTOR_SIZE, "BPB size mismatch");
+STATIC_ASSERT(sizeof(fat_dir_entry_t) == FAT_DIR_ENTRY_SIZE,  "FAT dir entry size mismatch");
+STATIC_ASSERT(sizeof(fat_lfn_entry_t) == FAT_LFN_ENTRY_SIZE,  "FAT LFN entry size mismatch");
 
 typedef struct {
     u32 first_cluster;        // First data cluster
@@ -338,10 +341,10 @@ static int parse_fat_tables(qfs_fat_t* qfs_fat) {
 			return -QCOW_IO_ERROR;
 		}
 
-		u32 entry_1 = (qfs_fat -> fat_tables)[j][1];
 		// TODO: Should we care about those?
-		if ((entry_1 & CLNSHUTBITMASK) == 0) WARNING_LOG("Dirty Volume.\n");
-		if ((entry_1 & HRDERRBITMASK) == 0)  WARNING_LOG("I/O Disk contains faults from previous unsuccessfull unmount operation.\n");
+		u32 first_entry = (qfs_fat -> fat_tables)[j][1];
+		if ((first_entry & FAT_CLNSHUTBITMASK) == 0) WARNING_LOG("Dirty Volume.\n");
+		if ((first_entry & FAT_HRDERRBITMASK) == 0)  WARNING_LOG("I/O Disk contains faults from previous unsuccessfull unmount operation.\n");
 	}
 
 	return QCOW_NO_ERROR;
@@ -398,7 +401,7 @@ static int fetch_next_cluster(qfs_fat_t* qfs_fat, u32* cluster_n, const bool upd
 	return QCOW_NO_ERROR;
 }
 
-static int iterate_fat_dir(fat_dir_entry_t* fat_entry, char name[MAX_FAT_NAME], u32* entry_idx, const u64 fat_dir_entries_per_cluster, qfs_fat_t* qfs_fat, const bool fetch_dirent, const char* s_name) {
+static int iterate_fat_dir(fat_dir_entry_t* fat_entry, char name[FAT_MAX_NAME], u32* entry_idx, const u64 fat_dir_entries_per_cluster, qfs_fat_t* qfs_fat, const bool fetch_dirent, const char* s_name) {
 	int err = 0;
 	u64 name_size = 0;
 	u8 lfn_entry_checksum = 0;
@@ -449,14 +452,14 @@ static int iterate_fat_dir(fat_dir_entry_t* fat_entry, char name[MAX_FAT_NAME], 
 			return QCOW_NO_ERROR;
 		}
 
-		mem_set(name, 0, MAX_FAT_NAME);
+		mem_set(name, 0, FAT_MAX_NAME);
 		name_size = 0;
 	}
 	
 	return -QCOW_END_OF_CLUSTER;
 }
 
-static int fat_lookup(qfs_fat_t* qfs_fat, u32 cluster_n, fat_dir_entry_t* fat_entry, char name[MAX_FAT_NAME], const char* s_name) {
+static int fat_lookup(qfs_fat_t* qfs_fat, u32 cluster_n, fat_dir_entry_t* fat_entry, char name[FAT_MAX_NAME], const char* s_name) {
 	int err = 0;
 	if ((err = fetch_next_cluster(qfs_fat, &cluster_n, FALSE)) < 0) {
 		WARNING_LOG("Failed to fetch the next cluster.\n");
@@ -483,7 +486,7 @@ static int fat_lookup(qfs_fat_t* qfs_fat, u32 cluster_n, fat_dir_entry_t* fat_en
 	return -QCOW_FILE_NOT_FOUND;
 }
 
-static int fat_readdir(qfs_fat_t* qfs_fat, u32* cluster_n, fat_dir_entry_t* fat_entry, u32* entry_idx, char name[MAX_FAT_NAME]) {
+static int fat_readdir(qfs_fat_t* qfs_fat, u32* cluster_n, fat_dir_entry_t* fat_entry, u32* entry_idx, char name[FAT_MAX_NAME]) {
 	int err = 0;
 	if ((err = fetch_next_cluster(qfs_fat, cluster_n, FALSE)) < 0) {
 		WARNING_LOG("Failed to fetch the next cluster.\n");

@@ -2,6 +2,7 @@
 #define _QCOW_BTRFS_H_
 
 typedef enum {
+	BTRFS_MAX_NAME                  = 256,
 	BTRFS_SUPERBLOCK_LOGICAL_OFFSET = 0x10000,
 	BTRFS_SUPERBLOCK_OFFSET         = 128,
 	BTRFS_NUM_BACKUP_ROOTS          = 4,
@@ -546,6 +547,21 @@ static int parse_btrfs_fs(qfs_btrfs_t* qfs_btrfs) {
 		return err;
 	}
 
+	TODO("Implement me!");
+	return -QCOW_TODO;
+}
+
+static int btrfs_lookup(qfs_btrfs_t* qfs_btrfs, char name[BTRFS_MAX_NAME], const char* s_name) {
+	TODO("Implement me!");
+	return -QCOW_TODO;
+}
+
+static int btrfs_readdir(qfs_btrfs_t* qfs_btrfs, u32* entry_idx, char name[BTRFS_MAX_NAME]) {
+	TODO("Implement me!");
+	return -QCOW_TODO;
+}
+
+static int btrfs_read(qfs_btrfs_t* qfs_btrfs, u64* offset, void* buf, u64 size) {
 	TODO("Implement me!");
 	return -QCOW_TODO;
 }

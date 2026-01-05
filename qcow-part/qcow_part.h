@@ -36,8 +36,10 @@ typedef enum {
 	MBR_PARTITION_ENTRIES_COUNT = 4,
 	MBR_EMPTY_PARTITION         = 0x00,
 	MBR_GPT_PROTECTIVE          = 0xEE,
-	FIRST_MBR_PARTITION_OFFSET  = 0x1BE,
-	SECTOR_SIZE = 512,
+	MBR_FIRST_PARTITION_OFFSET  = 0x1BE,
+	GPT_HEADER_SIZE             = 92,
+	GPT_ENTRY_SIZE              = 128,
+	SECTOR_SIZE                 = 512,
 } PartitionConstants;
 
 typedef u8 guid_t[16];
@@ -68,6 +70,9 @@ typedef struct PACKED_STRUCT {
 	u32 size_of_partition_entries;
 	u32 partition_entry_array_crc32;
 } gpt_header_t;
+
+STATIC_ASSERT(sizeof(gpt_entry_t)  == GPT_ENTRY_SIZE,  "GPT Entry size mismatch");
+STATIC_ASSERT(sizeof(gpt_header_t) == GPT_HEADER_SIZE, "GPT Header size mismatch");
 
 typedef struct {
     u64 start_lba;          // Absolute LBA on disk
@@ -104,11 +109,6 @@ static inline void print_guid(const guid_t g) {
 		g[8], g[9],                               /* Data4 (first 2 bytes) */
 		g[10], g[11], g[12], g[13], g[14], g[15]
 	);
-}
-
-static inline u64 align(const u64 val, const u64 alignment) {
-	if (val % alignment == 0) return val;
-	return val + (val % alignment);
 }
 
 static inline void print_part_name(const part_name_t name) {
@@ -209,7 +209,7 @@ static void parse_mbr_entries(const u8* first_sector, partition_t* partitions, u
 	
 	for (unsigned int i = 0; i < MBR_PARTITION_ENTRIES_COUNT; ++i) {
 		partition_t* partition = partitions + *partitions_cnt;
-		const u8* part_entry = first_sector + FIRST_MBR_PARTITION_OFFSET + i * 16;
+		const u8* part_entry = first_sector + MBR_FIRST_PARTITION_OFFSET + i * 16;
 		
 		// Check if the partition entry is empty 
 		const u8 part_type = part_entry[4];
@@ -432,7 +432,7 @@ static int parse_partitions(partition_t** partitions, unsigned int* partitions_c
 	if (((u16*) first_sector)[255] != MBR_SIGNATURE) return -QCOW_INVALID_DISK;
 	
 	PartitionScheme part_scheme = MBR;
-	const u8 part_type = first_sector[FIRST_MBR_PARTITION_OFFSET + 4];
+	const u8 part_type = first_sector[MBR_FIRST_PARTITION_OFFSET + 4];
 	if (part_type == MBR_GPT_PROTECTIVE) part_scheme = GPT;
 
 	*partitions_cnt = 0;
