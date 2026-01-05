@@ -438,7 +438,7 @@ static int iterate_fat_dir(fat_dir_entry_t* fat_entry, char name[MAX_FAT_NAME], 
 			u8 checksum = lfn_checksum(fat_entry -> name);
 			if (checksum != lfn_entry_checksum) {
 				WARNING_LOG("Checksum mismatch.\n");
-				return -QCOW_INVALID_LFN_CHECKSUM;
+				return -QCOW_INVALID_CRC_CHECKSUM;
 			}
 		}
 		

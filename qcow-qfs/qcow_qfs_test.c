@@ -184,7 +184,7 @@ int main(void) {
 		return 1;
 	}
 	
-	const partition_t fat_partition  = partitions[1];
+	/* const partition_t fat_partition  = partitions[1]; */
 	const partition_t btrfs_partition = partitions[2];
 	QCOW_SAFE_FREE(partitions);
 	
