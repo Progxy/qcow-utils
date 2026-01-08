@@ -13,7 +13,7 @@ typedef enum {
 	BTRFS_LEAF_NODE                 = 0,
 	BTRFS_TIME_SIZE                 = 0x0C,
 	BTRFS_KEY_SIZE                  = 0x11,
-	DEV_ITEM_SIZE                   = 0x62,
+	BTRFS_DEV_ITEM_SIZE             = 0x62,
 	BTRFS_CHUNK_ITEM_SIZE           = 0x30,
 	BTRFS_STRIPE_SIZE               = 0x20,
 	BTRFS_ROOT_BACKUP_SIZE          = 0xA8,
@@ -21,7 +21,6 @@ typedef enum {
 	BTRFS_NODE_HEADER_SIZE          = 0x65,
 	BTRFS_INTERNAL_NODE_SIZE        = 0x21,
 	BTRFS_LEAF_NODE_SIZE            = 0x19,
-	BTRFS_SUPERBLOCK_CSUM_OFFSET    = 0x20,
 	BTRFS_MAX_NODE_SIZE             = 65536
 } QCowBtrfsConstants;
 
@@ -58,11 +57,16 @@ typedef enum {
 } BtrfsObjectIds;
 
 typedef enum {
-	BTRFS_FREE_SPACE_BITMAP_KEY = 200,
-	BTRFS_DEV_EXTENT_KEY        = 204,
-	BTRFS_DEV_ITEM_KEY          = 216,
-	BTRFS_CHUNK_ITEM_KEY        = 228,
-	BTRFS_RAID_STRIPE_KEY       = 230,
+	BTRFS_FREE_SPACE_BITMAP_KEY = 0xC8,
+	BTRFS_DEV_EXTENT_KEY        = 0xCC,
+	BTRFS_DEV_ITEM_KEY          = 0xD8,
+	BTRFS_CHUNK_ITEM_KEY        = 0xE4,
+	BTRFS_RAID_STRIPE_KEY       = 0xE6,
+	/* BTRFS_FREE_SPACE_BITMAP_KEY = 200, */
+	/* BTRFS_DEV_EXTENT_KEY        = 204, */
+	/* BTRFS_DEV_ITEM_KEY          = 216, */
+	/* BTRFS_CHUNK_ITEM_KEY        = 228, */
+	/* BTRFS_RAID_STRIPE_KEY       = 230, */
 } BtrfsItemTypes;
 
 #define BTRFS_AVAIL_ALLOC_BIT_SINGLE (1ULL << 48)
@@ -137,8 +141,17 @@ typedef u8 btrfs_csum_t[32];
 typedef guid_t btrfs_uuid_t;
 
 typedef struct {
+	u64 low_range;
+	u64 up_range;
+	u64 phys_offset;
+} qfs_btrfs_chunks;
+
+typedef struct {
 	u64 size;
 	u64 start_lba;
+	qfs_btrfs_chunks* chunks;
+	u64 chunks_cnt;
+	u64 node_size;
 } qfs_btrfs_t;
 
 typedef struct PACKED_STRUCT {
@@ -167,7 +180,7 @@ typedef struct PACKED_STRUCT {
 	u8 bandwidth;
 	btrfs_uuid_t device_uuid;
 	btrfs_uuid_t fs_uuid;
-} dev_item_t;
+} btrfs_dev_item_t;
 
 typedef struct PACKED_STRUCT {
     u64 length;      // Size of chunk in bytes
@@ -244,7 +257,7 @@ typedef struct PACKED_STRUCT {
 	u8 root_level;
 	u8 chunk_root_level;
 	u8 log_root_level;
-	dev_item_t dev_item;       // DEV_ITEM data for this device
+	btrfs_dev_item_t dev_item;       // DEV_ITEM data for this device
 	u8 label[0x100];           // (may not contain ‘/’ or ‘\\’)
 	u64 cache_generation;
 	u64 uuid_tree_generation;
@@ -283,7 +296,7 @@ typedef struct PACKED_STRUCT {
 // Validate Structs Sizes
 STATIC_ASSERT(sizeof(btrfs_time_t)          == BTRFS_TIME_SIZE,          "BTRFS time size mismatch");
 STATIC_ASSERT(sizeof(btrfs_key_t)           == BTRFS_KEY_SIZE,           "BTRFS key size mismatch");
-STATIC_ASSERT(sizeof(dev_item_t)            == DEV_ITEM_SIZE,            "DEV_ITEM size mismatch");
+STATIC_ASSERT(sizeof(btrfs_dev_item_t)      == BTRFS_DEV_ITEM_SIZE,      "BTRFS DEV ITEM size mismatch");
 STATIC_ASSERT(sizeof(btrfs_chunk_item_t)    == BTRFS_CHUNK_ITEM_SIZE,    "BTRFS Chunk Item size mismatch");
 STATIC_ASSERT(sizeof(btrfs_stripe_t)        == BTRFS_STRIPE_SIZE,        "BTRFS Stripe size mismatch");
 STATIC_ASSERT(sizeof(btrfs_root_backup_t)   == BTRFS_ROOT_BACKUP_SIZE,   "BTRFS Root Backup size mismatch");
@@ -314,7 +327,7 @@ static void print_block_group(BtrfsBlockGroups btrfs_block_group) {
 	return;
 }
 
-static void print_dev_item(const dev_item_t* dev_item) {
+static void print_dev_item(const btrfs_dev_item_t* dev_item) {
 	printf("dev_item:\n");
 	printf("     -> device_id:         0x%llX\n", dev_item -> device_id);
 	printf("     -> bytes_cnt:         0x%llX\n", dev_item -> bytes_cnt);
@@ -472,7 +485,55 @@ static void print_btrfs_superblock(const btrfs_superblock_t* superblock) {
 	return;
 }
 
-static int check_sys_chunk_array_size(const u32 sector_size, const u8* sys_chunk_array, const u32 sys_chunk_array_size) {
+static void print_btrfs_leaf_node_items(const btrfs_leaf_node_t* leaf_nodes, const u64 leaf_nodes_cnt) {
+	printf(" -- Leaf Nodes --\n");
+	for (u64 i = 0; i < leaf_nodes_cnt; ++i) {
+		printf("  -> leaf_node %llu:\n", i);
+		print_btrfs_key(&((leaf_nodes + i) -> key), "    ");
+		printf("      -> offset: 0x%X\n", (leaf_nodes + i) -> offset);
+		printf("      -> size:   %u\n", (leaf_nodes + i) -> size);
+	}
+	printf("-----------------------\n");
+	return;
+}
+
+static void print_btrfs_node_header(const btrfs_node_header_t* header) {
+	printf(" -- Node Header --\n");
+	printf("  -> csum:            %X\n", *QCOW_CAST_PTR(header -> csum, u32));
+	printf("  -> fs_uuid:         ");
+	print_guid(header -> fs_uuid);
+	printf("\n");
+	printf("  -> node_lba:        %llX\n", header -> node_lba);
+	printf("  -> flags:           ");
+	for (unsigned char i = 0; i < 7; ++i) printf("%02X%s", (header -> flags)[i], i == 6 ? "\n" : " | ");
+	printf("  -> backref:         %02X\n", header -> backref);                   
+	printf("  -> chunk_tree_uuid: ");
+	print_guid(header -> chunk_tree_uuid);
+	printf("\n");
+	printf("  -> generation:      %llX\n", header -> generation);
+	printf("  -> tree_id:         %llX\n", header -> tree_id);
+	printf("  -> items_cnt:       %u\n", header -> items_cnt);
+	printf("  -> level:           %u\n", header -> level);
+	const btrfs_leaf_node_t* leaf_nodes = QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t), btrfs_leaf_node_t);
+	print_btrfs_leaf_node_items(leaf_nodes, header -> items_cnt);
+	for (u64 i = 0; i < header -> items_cnt; ++i) {
+		const btrfs_key_t key = (leaf_nodes + i) -> key;
+		if (key.item_type == BTRFS_DEV_ITEM_KEY) {
+			print_dev_item(QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t) + (leaf_nodes + i) -> offset, btrfs_dev_item_t));
+		} else if (key.item_type == BTRFS_CHUNK_ITEM_KEY) {
+			print_btrfs_chunk_item(QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t) + (leaf_nodes + i) -> offset, btrfs_chunk_item_t), "");
+		}
+	}
+	printf("-----------------------------------\n");
+	return;
+}
+
+static void deallocate_qfs_btrfs(qfs_btrfs_t* qfs_btrfs) {
+	QCOW_SAFE_FREE(qfs_btrfs -> chunks);
+	return;
+}
+
+static int check_sys_chunk_array_size(qfs_btrfs_t* qfs_btrfs, const u32 sector_size, const u8* sys_chunk_array, const u32 sys_chunk_array_size) {
 	if (sys_chunk_array_size > BTRFS_MAX_SYS_CHUNK_ARRAY_SIZE) {
 		WARNING_LOG("The sys chunk array size exceeds the max sys chunk array size: 0x%X > 0x%X\n", sys_chunk_array_size, BTRFS_MAX_SYS_CHUNK_ARRAY_SIZE);
 		return -QCOW_INVALID_SYS_CHUNK_ARRAY_SIZE;
@@ -512,6 +573,13 @@ static int check_sys_chunk_array_size(const u32 sector_size, const u8* sys_chunk
 		DEBUG_LOG("chunk type: ");
 		print_block_group(chunk_item -> type & BTRFS_BLOCK_GROUP_PROFILE_MASK);
 		printf("\n");
+		
+		qfs_btrfs -> chunks = qcow_realloc(qfs_btrfs -> chunks, sizeof(qfs_btrfs_chunks) * (qfs_btrfs -> chunks_cnt + chunk_item -> num_stripes));
+		if (qfs_btrfs -> chunks == NULL) {
+			WARNING_LOG("Failed to reallocate the chunks.\n");
+			return -QCOW_IO_ERROR;
+		}
+
 		DEBUG_LOG("local_range: [%llX, %llX]\n", key -> offset, key -> offset + chunk_item -> length);
 
 		const btrfs_stripe_t* stripes = QCOW_CAST_PTR(sys_chunk_array + bytes_cnt, btrfs_stripe_t); 
@@ -521,7 +589,9 @@ static int check_sys_chunk_array_size(const u32 sector_size, const u8* sys_chunk
 				WARNING_LOG("Stripe offset unaligned with stripe length.\n");
 				return -QCOW_UNALIGNED_OFFSET;
 			}
+			const qfs_btrfs_chunks chunk = { .low_range = key -> offset, .up_range = key -> offset + chunk_item -> length, .phys_offset = (stripes + i) -> offset };
 			DEBUG_LOG("mapped to: [%llX, %llX]\n", (stripes + i) -> dev_id, (stripes + i) -> offset);
+			(qfs_btrfs -> chunks)[(qfs_btrfs -> chunks_cnt)++] = chunk;
 		}
 
 		if (bytes_cnt > sys_chunk_array_size) {
@@ -538,7 +608,7 @@ static int check_sys_chunk_array_size(const u32 sector_size, const u8* sys_chunk
 	return QCOW_NO_ERROR;
 }
 
-static int validate_superblock(btrfs_superblock_t* superblock) {
+static int validate_superblock(qfs_btrfs_t* qfs_btrfs, btrfs_superblock_t* superblock) {
 	// Check the CSUM of the superblock
 	if (superblock -> csum_type != BTRFS_CRC32C) {
 		WARNING_LOG("Unknown CRC algorithm type: %X\n", superblock -> csum_type);
@@ -547,8 +617,8 @@ static int validate_superblock(btrfs_superblock_t* superblock) {
 	
 	// NOTE: the current size is u32, but in case of future introduction of
 	// larger/different crc algorithms this should be updated
-	const u8* buf = QCOW_CAST_PTR(superblock, u8) + BTRFS_SUPERBLOCK_CSUM_OFFSET;
-	const u32 csum_check = crc32c(buf, BTRFS_SUPERBLOCK_SIZE - BTRFS_SUPERBLOCK_CSUM_OFFSET);
+	const u8* buf = QCOW_CAST_PTR(superblock, u8) + sizeof(btrfs_csum_t);
+	const u32 csum_check = crc32c(buf, BTRFS_SUPERBLOCK_SIZE - sizeof(btrfs_csum_t));
 	if (mem_n_cmp(&csum_check, superblock -> csum, sizeof(u32))) {
 		WARNING_LOG("CRC mismatch %X != %X\n", csum_check, *((u32*) superblock -> csum));
 		return -QCOW_INVALID_CRC_CHECKSUM;
@@ -611,7 +681,7 @@ static int validate_superblock(btrfs_superblock_t* superblock) {
 		return -QCOW_INVALID_NUM_DEVICES;
 	}
 
-	if (check_sys_chunk_array_size(superblock -> sector_size, superblock -> sys_chunk_array, superblock -> sys_chunk_array_size)) {
+	if (check_sys_chunk_array_size(qfs_btrfs, superblock -> sector_size, superblock -> sys_chunk_array, superblock -> sys_chunk_array_size)) {
 		WARNING_LOG("Invalid sys chunk array size: 0x%X\n", superblock -> sys_chunk_array_size);
 		return -QCOW_INVALID_SYS_CHUNK_ARRAY_SIZE;
 	}
@@ -621,20 +691,85 @@ static int validate_superblock(btrfs_superblock_t* superblock) {
 	return QCOW_NO_ERROR;
 }
 
+static int validate_chunk_tree(const u8* chunk_tree, const u64 size, const guid_t fs_uuid, const u32 chunk_lba, const u8 chunk_level) {
+	const btrfs_node_header_t* header = QCOW_CAST_PTR(chunk_tree, btrfs_node_header_t);
+	
+	// NOTE: the current size is u32, but in case of future introduction of
+	// larger/different crc algorithms this should be updated
+	const u8* buf = QCOW_CAST_PTR(chunk_tree, u8) + sizeof(btrfs_csum_t); //BTRFS_SUPERBLOCK_CSUM_OFFSET;
+	const u32 csum_check = crc32c(buf, size - sizeof(btrfs_csum_t));
+	if (mem_n_cmp(&csum_check, header -> csum, sizeof(u32))) {
+		WARNING_LOG("CRC mismatch %X != %X\n", csum_check, *((u32*) header -> csum));
+		return -QCOW_INVALID_CRC_CHECKSUM;
+	}
+
+	if (mem_n_cmp(header -> fs_uuid, fs_uuid, sizeof(guid_t))) {
+		WARNING_LOG("Mismatch in FS UUID.\n");
+		return -QCOW_GUID_MISMATCH;
+	} else if (header -> node_lba != chunk_lba) {
+		WARNING_LOG("Mismatch node_lba and chunk_lba.\n");
+		return -QCOW_FIELD_MISMATCH;
+	} else if (header -> level != chunk_level) {
+		WARNING_LOG("Mismatch node level and chunk level.\n");
+		return -QCOW_FIELD_MISMATCH;
+	}
+
+	return QCOW_NO_ERROR;
+}
+
+static inline u64 btrfs_lba_to_physical_lba(const qfs_btrfs_t* qfs_btrfs, u64 btrfs_lba) {
+	for (u64 i = 0; i < qfs_btrfs -> chunks_cnt; ++i) {
+		if (btrfs_lba >= (qfs_btrfs -> chunks + i) -> low_range && btrfs_lba <= (qfs_btrfs -> chunks + i) -> up_range) {
+			return (qfs_btrfs -> chunks + i) -> phys_offset + (btrfs_lba - (qfs_btrfs -> chunks + i) -> low_range);
+		}
+	}
+	return -1ULL;
+}
+
 static int parse_superblock(qfs_btrfs_t* qfs_btrfs) {
 	btrfs_superblock_t superblock = {0};
 	if (get_n_sector_at(qfs_btrfs -> start_lba + BTRFS_SUPERBLOCK_OFFSET, sizeof(btrfs_superblock_t) / SECTOR_SIZE, &superblock)) {
+		WARNING_LOG("Failed to get superblock sectors.\n");
 		return -QCOW_IO_ERROR;
 	}
 
 	int err = 0;
-	if ((err = validate_superblock(&superblock)) < 0) {
+	if ((err = validate_superblock(qfs_btrfs, &superblock)) < 0) {
 		WARNING_LOG("Failed to validate the superblock.\n");
 		return err;
 	}
 
 	print_btrfs_superblock(&superblock);
 	
+	u8* chunk_root = qcow_calloc(superblock.node_size, sizeof(u8));
+	if (chunk_root == NULL) {
+		WARNING_LOG("Failed to allocate chunk_root buffer.\n");
+		return -QCOW_IO_ERROR;
+	}
+
+	u64 chunk_root_lba = btrfs_lba_to_physical_lba(qfs_btrfs, superblock.chunk_tree_root_lba);
+	if (chunk_root_lba % SECTOR_SIZE) {
+		WARNING_LOG("Trying to perform an unaligned sector read.");
+		return -QCOW_UNALIGNED_SECTOR;
+	}
+
+	chunk_root_lba = qfs_btrfs -> start_lba + chunk_root_lba / SECTOR_SIZE;
+	if (get_n_sector_at(chunk_root_lba, superblock.node_size / SECTOR_SIZE, chunk_root)) {
+		QCOW_SAFE_FREE(chunk_root);
+		WARNING_LOG("Failed to get chunk_root sectors.\n");
+		return -QCOW_IO_ERROR;
+	}
+	
+	if ((err = validate_chunk_tree(chunk_root, superblock.node_size, superblock.fs_uuid, superblock.chunk_tree_root_lba, superblock.chunk_root_level)) < 0) {
+		WARNING_LOG("Failed to validate chunk root tree.\n");
+		return err;
+	}
+
+	const btrfs_node_header_t* chunk_root_header = QCOW_CAST_PTR(chunk_root, btrfs_node_header_t);
+	print_btrfs_node_header(chunk_root_header);
+
+	QCOW_SAFE_FREE(chunk_root);
+
 	TODO("Implement me!");
 	return -QCOW_TODO;
 }
@@ -642,9 +777,12 @@ static int parse_superblock(qfs_btrfs_t* qfs_btrfs) {
 static int parse_btrfs_fs(qfs_btrfs_t* qfs_btrfs) {
 	int err = 0;
 	if ((err = parse_superblock(qfs_btrfs)) < 0) {
+		deallocate_qfs_btrfs(qfs_btrfs);
 		WARNING_LOG("Failed to parse the superblock.\n");
 		return err;
 	}
+	
+	deallocate_qfs_btrfs(qfs_btrfs);
 
 	TODO("Implement me!");
 	return -QCOW_TODO;
