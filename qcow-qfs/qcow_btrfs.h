@@ -21,6 +21,8 @@ typedef enum {
 	BTRFS_NODE_HEADER_SIZE          = 0x65,
 	BTRFS_INTERNAL_NODE_SIZE        = 0x21,
 	BTRFS_LEAF_NODE_SIZE            = 0x19,
+	BTRFS_INODE_REF_SIZE            = 0x0A,
+	BTRFS_ROOT_REF_SIZE             = 0x12,
 	BTRFS_MAX_NODE_SIZE             = 65536
 } QCowBtrfsConstants;
 
@@ -57,16 +59,17 @@ typedef enum {
 } BtrfsObjectIds;
 
 typedef enum {
+	BTRFS_INODE_ITEM_KEY        = 0x01,
+	BTRFS_INODE_REF_KEY         = 0x0C,
+	BTRFS_DIR_ITEM_KEY          = 0x54,
+	BTRFS_ROOT_ITEM_KEY         = 0x84,
+	BTRFS_ROOT_BACKREF_KEY      = 0x90,
+	BTRFS_ROOT_REF_KEY          = 0x9C,
 	BTRFS_FREE_SPACE_BITMAP_KEY = 0xC8,
 	BTRFS_DEV_EXTENT_KEY        = 0xCC,
 	BTRFS_DEV_ITEM_KEY          = 0xD8,
 	BTRFS_CHUNK_ITEM_KEY        = 0xE4,
 	BTRFS_RAID_STRIPE_KEY       = 0xE6,
-	/* BTRFS_FREE_SPACE_BITMAP_KEY = 200, */
-	/* BTRFS_DEV_EXTENT_KEY        = 204, */
-	/* BTRFS_DEV_ITEM_KEY          = 216, */
-	/* BTRFS_CHUNK_ITEM_KEY        = 228, */
-	/* BTRFS_RAID_STRIPE_KEY       = 230, */
 } BtrfsItemTypes;
 
 #define BTRFS_AVAIL_ALLOC_BIT_SINGLE (1ULL << 48)
@@ -144,6 +147,7 @@ typedef struct {
 	u64 low_range;
 	u64 up_range;
 	u64 phys_offset;
+	u64 dev_id;
 } qfs_btrfs_chunks;
 
 typedef struct {
@@ -159,11 +163,38 @@ typedef struct PACKED_STRUCT {
 	u32 nanosecs; // Number of nanoseconds since the beginning of the second.
 } btrfs_time_t;
 
+typedef btrfs_time_t btrfs_timespec_t;
+
 typedef struct PACKED_STRUCT {
 	u64 obj_id;   // Object ID. Each tree has its own set of Object IDs.
 	u8 item_type;
 	u64 offset;   // Offset. The meaning depends on the item type.
 } btrfs_key_t;
+
+// NOTE: that the disk key should be in little endian, and key_t in cpu native
+// endianess (but we only work with little endian so they are always the same).
+typedef btrfs_key_t btrfs_disk_key_t;
+
+typedef struct PACKED_STRUCT {
+	u64 dir_idx; // index in the directory
+	u16 dir_name_size;
+	// Follows ASCII dir_name for dir_name_size bytes
+} btrfs_inode_ref_t;
+
+typedef struct PACKED_STRUCT {
+	u64 dir_idx;       // ID of directory in [tree id] that contains the subtree
+	u64 sequence;      // Sequence (index in tree) (even, starting at 2?)
+	u16 dir_name_size;
+	// Follows ASCII dir_name for dir_name_size bytes
+} btrfs_root_ref_t;
+
+typedef struct PACKED_STRUCT {
+	btrfs_disk_key_t location;
+	u64 transid;
+	u16 data_len;
+	u16 name_len;
+	u8 type;
+} btrfs_dir_item_t;
 
 typedef struct PACKED_STRUCT {
 	u64 device_id;
@@ -197,7 +228,7 @@ typedef struct PACKED_STRUCT {
 
 typedef struct PACKED_STRUCT {
     u64 dev_id;             // Device ID
-    u64 offset;            // Physical offset on that device
+    u64 offset;             // Physical offset on that device
     btrfs_uuid_t dev_uuid;
 } btrfs_stripe_t;
 
@@ -254,7 +285,7 @@ typedef struct PACKED_STRUCT {
 	u64 compat_ro_flags;       // - only implementations that support the flags can write to the filesystem
 	u64 incompat_flags;        // - only implementations that support the flags can use the filesystem
 	u16 csum_type;             // - Btrfs currently uses the CRC32c little-endian hash function with seed -1.
-	u8 root_level;
+	u8 root_tree_level;
 	u8 chunk_root_level;
 	u8 log_root_level;
 	btrfs_dev_item_t dev_item;       // DEV_ITEM data for this device
@@ -289,9 +320,83 @@ typedef struct PACKED_STRUCT {
 
 typedef struct PACKED_STRUCT {
 	btrfs_key_t key;
-	u32 offset;      // data offset relative to end of header (65);
+	u32 offset;      // data offset relative to end of header (65)
 	u32 size;        // data size;
 } btrfs_leaf_node_t;
+
+typedef struct PACKED_STRUCT {
+	/* nfs style generation number */
+	u64 generation;
+	/* transid that last touched this inode */
+	u64 transid;
+	u64 size;
+	u64 nbytes;
+	u64 block_group;
+	u32 nlink;
+	u32 uid;
+	u32 gid;
+	u32 mode;
+	u64 rdev;
+	u64 flags;
+
+	/* modification sequence number for NFS */
+	u64 sequence;
+
+	/*
+	 * a little future expansion, for more than this we can
+	 * just grow the inode item and version it
+	 */
+	u64 reserved[4];
+	btrfs_timespec_t atime;
+	btrfs_timespec_t ctime;
+	btrfs_timespec_t mtime;
+	btrfs_timespec_t otime;
+} btrfs_inode_item_t;
+
+typedef struct PACKED_STRUCT {
+	btrfs_inode_item_t inode;
+	u64 generation;
+	u64 root_dirid;
+	u64 bytenr;
+	u64 byte_limit;
+	u64 bytes_used;
+	u64 last_snapshot;
+	u64 flags;
+	u32 refs;
+	btrfs_disk_key_t drop_progress;
+	u8 drop_level;
+	u8 level;
+
+	/*
+	 * The following fields appear after subvol_uuids+subvol_times
+	 * were introduced.
+	 */
+
+	/*
+	 * This generation number is used to test if the new fields are valid
+	 * and up to date while reading the root item. Every time the root item
+	 * is written out, the "generation" field is copied into this field. If
+	 * anyone ever mounted the fs with an older kernel, we will have
+	 * mismatching generation values here and thus must invalidate the
+	 * new fields. See btrfs_update_root and btrfs_find_last_root for
+	 * details.
+	 * The offset of generation_v2 is also used as the start for the memset
+	 * when invalidating the fields.
+	 */
+	u64 generation_v2;
+	btrfs_uuid_t uuid;
+	btrfs_uuid_t parent_uuid;
+	btrfs_uuid_t received_uuid;
+	u64 ctransid; /* updated when an inode changes */
+	u64 otransid; /* trans when created */
+	u64 stransid; /* trans when sent. non-zero for received subvol */
+	u64 rtransid; /* trans when received. non-zero for received subvol */
+	btrfs_timespec_t ctime;
+	btrfs_timespec_t otime;
+	btrfs_timespec_t stime;
+	btrfs_timespec_t rtime;
+	u64 reserved[8]; /* for future */
+} btrfs_root_item_t;
 
 // Validate Structs Sizes
 STATIC_ASSERT(sizeof(btrfs_time_t)          == BTRFS_TIME_SIZE,          "BTRFS time size mismatch");
@@ -304,6 +409,8 @@ STATIC_ASSERT(sizeof(btrfs_superblock_t)    == BTRFS_SUPERBLOCK_SIZE,    "BTRFS 
 STATIC_ASSERT(sizeof(btrfs_node_header_t)   == BTRFS_NODE_HEADER_SIZE,   "BTRFS Node Header size mismatch");
 STATIC_ASSERT(sizeof(btrfs_internal_node_t) == BTRFS_INTERNAL_NODE_SIZE, "BTRFS Internal Node size mismatch");
 STATIC_ASSERT(sizeof(btrfs_leaf_node_t)     == BTRFS_LEAF_NODE_SIZE,     "BTRFS Leaf Node size mismatch");
+STATIC_ASSERT(sizeof(btrfs_inode_ref_t)     == BTRFS_INODE_REF_SIZE,     "BTRFS Inode Ref size mismatch");
+STATIC_ASSERT(sizeof(btrfs_root_ref_t)      == BTRFS_ROOT_REF_SIZE,      "BTRFS Root Ref size mismatch");
 
 // Utility Functions
 static void print_compat_ro_feature(BtrfsFlags btrfs_flag) {
@@ -327,8 +434,25 @@ static void print_block_group(BtrfsBlockGroups btrfs_block_group) {
 	return;
 }
 
+static void print_btrfs_inode_ref(const btrfs_inode_ref_t* inode_ref) {
+	printf(" -- Inode Ref --\n");
+	printf("  -> dir_idx: 0x%llX\n", inode_ref -> dir_idx);
+	printf("  -> name:    '%.*s'\n", (int) inode_ref -> dir_name_size, QCOW_CAST_PTR(inode_ref, u8) + sizeof(btrfs_inode_ref_t));
+	printf("---------------------------\n");
+	return;
+}
+
+static void print_btrfs_root_ref(const btrfs_root_ref_t* root_ref) {
+	printf(" -- Root Ref --\n");
+	printf("  -> dir_idx:   0x%llX\n", root_ref -> dir_idx);
+	printf("  -> sequence:  0x%llX\n", root_ref -> sequence);
+	printf("  -> name:      '%.*s'\n", (int) root_ref -> dir_name_size, QCOW_CAST_PTR(root_ref, u8) + sizeof(btrfs_root_ref_t));
+	printf("---------------------------\n");
+	return;
+}
+
 static void print_dev_item(const btrfs_dev_item_t* dev_item) {
-	printf("dev_item:\n");
+	printf("  -> dev_item:\n");
 	printf("     -> device_id:         0x%llX\n", dev_item -> device_id);
 	printf("     -> bytes_cnt:         0x%llX\n", dev_item -> bytes_cnt);
 	printf("     -> used_bytes_cnt:    0x%llX\n", dev_item -> used_bytes_cnt);
@@ -350,11 +474,78 @@ static void print_dev_item(const btrfs_dev_item_t* dev_item) {
 	return;
 }
 
+const u8 day_in_month[] = {
+	31, /* January   */
+    28, /* February  */
+    31, /* March     */
+    30, /* April     */
+    31, /* May       */
+    30, /* June      */
+    31, /* July      */
+    31, /* August    */
+    30, /* September */
+    31, /* October   */
+    30, /* November  */
+    31  /* December  */
+};
+
+static void print_btrfs_time(const btrfs_time_t* time) {
+	u64 secs = time -> secs;
+	const u32 seconds = secs % 60;
+	secs -= seconds;
+	
+	u32 minutes = secs % 3600;
+	secs -= minutes;
+   	minutes /= 60;
+
+	u32 hours = secs % (3600 * 24);
+	secs -= hours;
+	hours /= 3600;
+
+	u32 year = 1970;
+	while (secs > (365 + (year % 4 == 0)) * (3600 * 24)) {
+		secs -= (365 + (year % 4 == 0)) * (3600 * 24);	
+		year++;
+	}
+
+	u32 month = 0;
+	while (secs > day_in_month[month % 12] * (3600 * 24)) {
+		secs -= day_in_month[month % 12] * (3600 * 24);	
+		month++;
+	}
+	month++;
+	
+	const u32 day = 1 + secs / (3600 * 24);
+	
+	printf("%02u:%02u:%02u:%u %02u/%02u/%04u", hours, minutes, seconds, time -> nanosecs, day, month, year);
+	
+	return;
+}
+
 static void print_btrfs_key(const btrfs_key_t* key, const char* prefix) {
 	printf("%s  -> key:\n", prefix);
-	printf("%s      -> obj_id:    0x%llX\n", prefix, key -> obj_id);
+	printf("%s      -> obj_id:    ", prefix);
+	if ((s64) key -> obj_id < 0) printf("%lld\n", key -> obj_id);
+	else printf("0x%llX\n", key -> obj_id);
 	printf("%s      -> item_type: 0x%X\n",   prefix, key -> item_type);
 	printf("%s      -> offset:    0x%llX\n", prefix, key -> offset);
+	return;
+}
+
+static void print_btrfs_dir_item(const btrfs_dir_item_t* dir_items, const u64 dir_items_size) {
+	printf(" -- Dir Items --\n");
+	for (u64 i = 0; i < dir_items_size;) {
+		const btrfs_dir_item_t* dir_item = QCOW_CAST_PTR(QCOW_CAST_PTR(dir_items, u8) + i, btrfs_dir_item_t);
+		printf("  -> dir_item:\n");
+		print_btrfs_key(&(dir_item -> location), "    ");
+		printf("      -> transid:  0x%llX\n", dir_item -> transid);
+		printf("      -> data_len: 0x%X\n", dir_item -> data_len);
+		printf("      -> name_len: 0x%X\n", dir_item -> name_len);
+		printf("      -> type:     0x%X\n", dir_item -> type);
+		printf("      -> name:     '%.*s'\n", (int) dir_item -> name_len, QCOW_CAST_PTR(dir_item, u8) + sizeof(btrfs_dir_item_t));
+		i += sizeof(btrfs_dir_item_t) + dir_item -> name_len;
+	}
+	printf("----------------------------------------\n");
 	return;
 }
 
@@ -470,10 +661,9 @@ static void print_btrfs_superblock(const btrfs_superblock_t* superblock) {
 	print_incompat_feature(superblock -> incompat_flags);
 	printf("\n");
 	printf("  -> csum_type:              0x%X\n", superblock -> csum_type);
-	printf("  -> root_level:             0x%X\n", superblock -> root_level);
+	printf("  -> root_tree_level:             0x%X\n", superblock -> root_tree_level);
 	printf("  -> chunk_root_level:       0x%X\n", superblock -> chunk_root_level);
 	printf("  -> log_root_level:         0x%X\n", superblock -> log_root_level);
-	printf("  -> ");
 	print_dev_item(&(superblock -> dev_item));
 	const int label_size = (int) MIN(str_len((const char*) superblock -> label), 0x100);
 	printf("  -> label[%03d]:             '%.*s'\n", label_size, label_size, superblock -> label);
@@ -514,17 +704,91 @@ static void print_btrfs_node_header(const btrfs_node_header_t* header) {
 	printf("  -> tree_id:         %llX\n", header -> tree_id);
 	printf("  -> items_cnt:       %u\n", header -> items_cnt);
 	printf("  -> level:           %u\n", header -> level);
-	const btrfs_leaf_node_t* leaf_nodes = QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t), btrfs_leaf_node_t);
-	print_btrfs_leaf_node_items(leaf_nodes, header -> items_cnt);
-	for (u64 i = 0; i < header -> items_cnt; ++i) {
-		const btrfs_key_t key = (leaf_nodes + i) -> key;
-		if (key.item_type == BTRFS_DEV_ITEM_KEY) {
-			print_dev_item(QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t) + (leaf_nodes + i) -> offset, btrfs_dev_item_t));
-		} else if (key.item_type == BTRFS_CHUNK_ITEM_KEY) {
-			print_btrfs_chunk_item(QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t) + (leaf_nodes + i) -> offset, btrfs_chunk_item_t), "");
-		}
-	}
 	printf("-----------------------------------\n");
+	return;
+}
+
+static void print_btrfs_inode_item(const btrfs_inode_item_t* inode_item, const char* prefix) {
+	printf("%s  -> generation:  0x%llX\n", prefix, inode_item -> generation);
+	printf("%s  -> transid:     0x%llX\n", prefix, inode_item -> transid);
+	printf("%s  -> size:        0x%llX\n", prefix, inode_item -> size);
+	printf("%s  -> nbytes:      0x%llX\n", prefix, inode_item -> nbytes);
+	printf("%s  -> block_group: 0x%llX\n", prefix, inode_item -> block_group);
+	printf("%s  -> nlink:       0x%X\n", prefix, inode_item -> nlink);
+	printf("%s  -> uid:         0x%X\n", prefix, inode_item -> uid);
+	printf("%s  -> gid:         0x%X\n", prefix, inode_item -> gid);
+	printf("%s  -> mode:        0x%X\n", prefix, inode_item -> mode);
+	printf("%s  -> rdev:        0x%llX\n", prefix, inode_item -> rdev);
+	printf("%s  -> flags:       0x%llX\n", prefix, inode_item -> flags);
+	printf("%s  -> sequence:    0x%llX\n", prefix, inode_item -> sequence);
+
+	printf("%s  -> atime:       ", prefix);
+	print_btrfs_time(&(inode_item -> atime));
+	printf("\n");
+	printf("%s  -> ctime:       ", prefix);
+	print_btrfs_time(&(inode_item -> ctime));
+	printf("\n");
+	printf("%s  -> mtime:       ", prefix);
+	print_btrfs_time(&(inode_item -> mtime));
+	printf("\n");
+	printf("%s  -> otime:       ", prefix);
+	print_btrfs_time(&(inode_item -> otime));
+	printf("\n");
+	
+	return;
+}
+
+static void print_btrfs_root_item(const btrfs_root_item_t* root_item) {
+	printf(" -- Root Item --\n");	
+	printf("  -> inode:\n");
+	print_btrfs_inode_item(&(root_item -> inode), "    ");
+	printf("  -> generation:    0x%llX\n", root_item -> generation);
+	printf("  -> root_dirid:    0x%llX\n", root_item -> root_dirid);
+	printf("  -> bytenr:        0x%llX\n", root_item -> bytenr);
+	printf("  -> byte_limit:    0x%llX\n", root_item -> byte_limit);
+	printf("  -> bytes_used:    0x%llX\n", root_item -> bytes_used);
+	printf("  -> last_snapshot: 0x%llX\n", root_item -> last_snapshot);
+	printf("  -> flags:         0x%llX\n", root_item -> flags);
+	printf("  -> refs:          0x%X\n", root_item -> refs);
+	printf("  -> drop_progress: \n");
+	print_btrfs_key(&(root_item -> drop_progress), "    ");
+	printf("  -> drop_level:    0x%X\n", root_item -> drop_level);
+	printf("  -> level:         %u\n", root_item -> level);
+
+	/*
+	 * The following fields appear after subvol_uuids+subvol_times
+	 * were introduced.
+	 */
+
+	printf("  -> generation_v2: 0x%llX\n", root_item -> generation_v2);
+	printf("  -> uuid:          ");
+	print_guid(root_item -> uuid);
+	printf("\n");
+	printf("  -> parent_uuid:   ");
+	print_guid(root_item -> parent_uuid);
+	printf("\n");
+	printf("  -> received_uuid: ");
+	print_guid(root_item -> received_uuid);
+	printf("\n");
+	printf("  -> ctransid: 0x%llX\n", root_item -> ctransid);
+	printf("  -> otransid: 0x%llX\n", root_item -> otransid);
+	printf("  -> stransid: 0x%llX\n", root_item -> stransid);
+	printf("  -> rtransid: 0x%llX\n", root_item -> rtransid);
+	printf("  -> ctime:    ");
+	print_btrfs_time(&(root_item -> ctime));
+	printf("\n");
+	printf("  -> otime:    ");
+	print_btrfs_time(&(root_item -> otime));
+	printf("\n");
+	printf("  -> stime:    ");
+	print_btrfs_time(&(root_item -> stime));
+	printf("\n");
+	printf("  -> rtime:    ");
+	print_btrfs_time(&(root_item -> rtime));
+	printf("\n");
+	
+	printf("-----------------------------------\n");
+
 	return;
 }
 
@@ -533,19 +797,70 @@ static void deallocate_qfs_btrfs(qfs_btrfs_t* qfs_btrfs) {
 	return;
 }
 
+static int validate_btrfs_key(const btrfs_key_t* key, const u32 sector_size) {
+	if (key -> offset % sector_size) {
+		WARNING_LOG("Offset is unaligned with sector size.\n");
+		return -QCOW_UNALIGNED_OFFSET;
+	}
+	return QCOW_NO_ERROR;
+}
+
+static int extend_chunk_mapping(qfs_btrfs_t* qfs_btrfs, const btrfs_key_t* key, const btrfs_chunk_item_t* chunk_item, const u32 sector_size) {
+	if (chunk_item -> length % chunk_item -> stripe_len) {
+		WARNING_LOG("Chunk item length must be aligned with stripe length.\n");
+		return -QCOW_UNALIGNED_LENGTH;
+	} else if (chunk_item -> num_stripes == 0) {
+		WARNING_LOG("Chunk item cannot have zero stripes.\n");
+		return -QCOW_CHUNK_ITEM_WITH_NO_STRIPES;
+	} else if (sector_size != chunk_item -> sector_size) {
+		WARNING_LOG("Mismatch between superblock's sector size and chunk item sector size.\n");
+		return -QCOW_FIELD_MISMATCH;
+	} else if (chunk_item -> stripe_len < chunk_item -> sector_size) {
+		WARNING_LOG("Stripe length cannot be less than sector size.\n");
+		return -QCOW_INVALID_STRIPE_LENGTH;
+	}
+
+	DEBUG_LOG("chunk type: ");
+	/* print_block_group(chunk_item -> type & BTRFS_BLOCK_GROUP_PROFILE_MASK); */
+	print_block_group(chunk_item -> type);
+	printf("\n");
+	
+	qfs_btrfs -> chunks = qcow_realloc(qfs_btrfs -> chunks, sizeof(qfs_btrfs_chunks) * (qfs_btrfs -> chunks_cnt + chunk_item -> num_stripes));
+	if (qfs_btrfs -> chunks == NULL) {
+		WARNING_LOG("Failed to reallocate the chunks.\n");
+		return -QCOW_IO_ERROR;
+	}
+
+	DEBUG_LOG("local_range: [%llX, %llX]\n", key -> offset, key -> offset + chunk_item -> length);
+
+	const btrfs_stripe_t* stripes = QCOW_CAST_PTR(QCOW_CAST_PTR(chunk_item, u8) + sizeof(btrfs_chunk_item_t), btrfs_stripe_t); 
+	for (u16 i = 0; i < chunk_item -> num_stripes; ++i) {
+		if ((stripes + i) -> offset % chunk_item -> stripe_len) {
+			WARNING_LOG("Stripe offset unaligned with stripe length.\n");
+			return -QCOW_UNALIGNED_OFFSET;
+		}
+		const qfs_btrfs_chunks chunk = { .low_range = key -> offset, .up_range = key -> offset + chunk_item -> length, .phys_offset = (stripes + i) -> offset, .dev_id = stripes -> dev_id };
+		DEBUG_LOG("mapped to: [%llX, %llX]\n", (stripes + i) -> dev_id, (stripes + i) -> offset);
+		(qfs_btrfs -> chunks)[(qfs_btrfs -> chunks_cnt)++] = chunk;
+	}
+
+	return QCOW_NO_ERROR;
+}
+
 static int check_sys_chunk_array_size(qfs_btrfs_t* qfs_btrfs, const u32 sector_size, const u8* sys_chunk_array, const u32 sys_chunk_array_size) {
 	if (sys_chunk_array_size > BTRFS_MAX_SYS_CHUNK_ARRAY_SIZE) {
 		WARNING_LOG("The sys chunk array size exceeds the max sys chunk array size: 0x%X > 0x%X\n", sys_chunk_array_size, BTRFS_MAX_SYS_CHUNK_ARRAY_SIZE);
 		return -QCOW_INVALID_SYS_CHUNK_ARRAY_SIZE;
 	}
 
+	int err = 0;
 	u32 bytes_cnt = 0;
 	for (u32 j = 0; bytes_cnt < sys_chunk_array_size && bytes_cnt < BTRFS_MAX_SYS_CHUNK_ARRAY_SIZE; ++j) {
 		const btrfs_key_t* key = QCOW_CAST_PTR(sys_chunk_array + bytes_cnt, btrfs_key_t);
 		bytes_cnt += sizeof(btrfs_key_t);
-		if (key -> offset % sector_size) {
-			WARNING_LOG("Offset is unaligned with sector size.\n");
-			return -QCOW_UNALIGNED_OFFSET;
+		if ((err = validate_btrfs_key(key, sector_size)) < 0) {
+			WARNING_LOG("Failed to validate key.\n");
+			return err;
 		} else if (key -> obj_id != BTRFS_FIRST_CHUNK_TREE_OBJECTID) {
 			WARNING_LOG("Expected First Chunk Tree Object ID, but found: %llX\n", key -> obj_id);
 			return -QCOW_INVALID_OBJECT_ID;
@@ -556,43 +871,13 @@ static int check_sys_chunk_array_size(qfs_btrfs_t* qfs_btrfs, const u32 sector_s
 		
 		const btrfs_chunk_item_t* chunk_item = QCOW_CAST_PTR(sys_chunk_array + bytes_cnt, btrfs_chunk_item_t);
 		bytes_cnt += sizeof(btrfs_chunk_item_t);
-		if (chunk_item -> length % chunk_item -> stripe_len) {
-			WARNING_LOG("Chunk item length must be aligned with stripe length.\n");
-			return -QCOW_UNALIGNED_LENGTH;
-		} else if (chunk_item -> num_stripes == 0) {
-			WARNING_LOG("Chunk item cannot have zero stripes.\n");
-			return -QCOW_CHUNK_ITEM_WITH_NO_STRIPES;
-		} else if (sector_size != chunk_item -> sector_size) {
-			WARNING_LOG("Mismatch between superblock's sector size and chunk item sector size.\n");
-			return -QCOW_FIELD_MISMATCH;
-		} else if (chunk_item -> stripe_len < chunk_item -> sector_size) {
-			WARNING_LOG("Stripe length cannot be less than sector size.\n");
-			return -QCOW_INVALID_STRIPE_LENGTH;
+	   	
+		if ((err = extend_chunk_mapping(qfs_btrfs, key, chunk_item, sector_size)) < 0) {
+			WARNING_LOG("Failed to extend chunk mapping.\n");
+			return err;
 		}
 
-		DEBUG_LOG("chunk type: ");
-		print_block_group(chunk_item -> type & BTRFS_BLOCK_GROUP_PROFILE_MASK);
-		printf("\n");
-		
-		qfs_btrfs -> chunks = qcow_realloc(qfs_btrfs -> chunks, sizeof(qfs_btrfs_chunks) * (qfs_btrfs -> chunks_cnt + chunk_item -> num_stripes));
-		if (qfs_btrfs -> chunks == NULL) {
-			WARNING_LOG("Failed to reallocate the chunks.\n");
-			return -QCOW_IO_ERROR;
-		}
-
-		DEBUG_LOG("local_range: [%llX, %llX]\n", key -> offset, key -> offset + chunk_item -> length);
-
-		const btrfs_stripe_t* stripes = QCOW_CAST_PTR(sys_chunk_array + bytes_cnt, btrfs_stripe_t); 
-	   	bytes_cnt += sizeof(btrfs_stripe_t) * chunk_item -> num_stripes;
-		for (u16 i = 0; i < chunk_item -> num_stripes; ++i) {
-			if ((stripes + i) -> offset % chunk_item -> stripe_len) {
-				WARNING_LOG("Stripe offset unaligned with stripe length.\n");
-				return -QCOW_UNALIGNED_OFFSET;
-			}
-			const qfs_btrfs_chunks chunk = { .low_range = key -> offset, .up_range = key -> offset + chunk_item -> length, .phys_offset = (stripes + i) -> offset };
-			DEBUG_LOG("mapped to: [%llX, %llX]\n", (stripes + i) -> dev_id, (stripes + i) -> offset);
-			(qfs_btrfs -> chunks)[(qfs_btrfs -> chunks_cnt)++] = chunk;
-		}
+		bytes_cnt += sizeof(btrfs_stripe_t) * chunk_item -> num_stripes;
 
 		if (bytes_cnt > sys_chunk_array_size) {
 			WARNING_LOG("bytes_cnt exceeds the sys chunk array size: 0x%X > 0x%X\n", bytes_cnt, sys_chunk_array_size);
@@ -646,8 +931,8 @@ static int validate_superblock(qfs_btrfs_t* qfs_btrfs, btrfs_superblock_t* super
 		return -QCOW_INVALID_SIZE;
 	}
 
-	if (superblock -> root_level > BTRFS_MAX_LEVEL) {
-		WARNING_LOG("Invalid root level: %X\n", superblock -> root_level);
+	if (superblock -> root_tree_level > BTRFS_MAX_LEVEL) {
+		WARNING_LOG("Invalid root level: %X\n", superblock -> root_tree_level);
 		return -QCOW_INVALID_LEVEL;
 	} else if (superblock -> chunk_root_level > BTRFS_MAX_LEVEL) {
 		WARNING_LOG("Invalid chunk root level: %X\n", superblock -> chunk_root_level);
@@ -726,21 +1011,67 @@ static inline u64 btrfs_lba_to_physical_lba(const qfs_btrfs_t* qfs_btrfs, u64 bt
 	return -1ULL;
 }
 
-static int parse_superblock(qfs_btrfs_t* qfs_btrfs) {
-	btrfs_superblock_t superblock = {0};
-	if (get_n_sector_at(qfs_btrfs -> start_lba + BTRFS_SUPERBLOCK_OFFSET, sizeof(btrfs_superblock_t) / SECTOR_SIZE, &superblock)) {
-		WARNING_LOG("Failed to get superblock sectors.\n");
-		return -QCOW_IO_ERROR;
-	}
-
-	int err = 0;
-	if ((err = validate_superblock(qfs_btrfs, &superblock)) < 0) {
-		WARNING_LOG("Failed to validate the superblock.\n");
-		return err;
-	}
-
-	print_btrfs_superblock(&superblock);
+static int parse_node_header(qfs_btrfs_t* qfs_btrfs, const btrfs_node_header_t* header, const u32 sector_size) {
+	print_btrfs_node_header(header);
 	
+	if (header -> level == 0) {
+		const btrfs_leaf_node_t* leaf_nodes = QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t), btrfs_leaf_node_t);
+		
+		int err = 0;
+		for (u64 i = 0; i < header -> items_cnt; ++i) {
+			const btrfs_key_t key = (leaf_nodes + i) -> key;
+			if (key.item_type == BTRFS_DEV_ITEM_KEY) {
+				// TODO: Validate dev item
+				print_dev_item(QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t) + (leaf_nodes + i) -> offset, btrfs_dev_item_t));
+			} else if (key.item_type == BTRFS_CHUNK_ITEM_KEY) {
+				const btrfs_chunk_item_t* chunk_item = QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t) + (leaf_nodes + i) -> offset, btrfs_chunk_item_t);
+				print_btrfs_chunk_item(chunk_item, "");
+				if ((err = extend_chunk_mapping(qfs_btrfs, &key, chunk_item, sector_size)) < 0) {
+					WARNING_LOG("Failed to extend the chunk mapping.\n");
+					return err;
+				}
+			} else if (key.item_type == BTRFS_ROOT_ITEM_KEY) {
+				const btrfs_root_item_t* root_item = QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t) + (leaf_nodes + i) -> offset, btrfs_root_item_t);
+				print_btrfs_root_item(root_item);
+			} else if (key.item_type == BTRFS_INODE_REF_KEY) {
+				const btrfs_inode_ref_t* inode_ref = QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t) + (leaf_nodes + i) -> offset, btrfs_inode_ref_t);
+				print_btrfs_inode_ref(inode_ref);
+			} else if (key.item_type == BTRFS_DIR_ITEM_KEY) {
+				const btrfs_dir_item_t* dir_item = QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t) + (leaf_nodes + i) -> offset, btrfs_dir_item_t);
+				print_btrfs_dir_item(dir_item, (leaf_nodes + i) -> size);
+			} else if (key.item_type == BTRFS_ROOT_REF_KEY || key.item_type == BTRFS_ROOT_BACKREF_KEY) {
+				const btrfs_root_ref_t* root_ref = QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t) + (leaf_nodes + i) -> offset, btrfs_root_ref_t);
+				print_btrfs_root_ref(root_ref);
+			} else if (key.item_type == BTRFS_INODE_ITEM_KEY) {
+				const btrfs_inode_item_t* inode_item = QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t) + (leaf_nodes + i) -> offset, btrfs_inode_item_t);
+				printf(" -- Inode Item --\n");
+				print_btrfs_inode_item(inode_item, "    ");
+				printf("--------------------------------\n");
+			} else {
+				DEBUG_LOG("  -> leaf_node %llu:\n", i);
+				print_btrfs_key(&((leaf_nodes + i) -> key), "    ");
+				printf("      -> offset: 0x%X\n", (leaf_nodes + i) -> offset);
+				printf("      -> size:   %u\n", (leaf_nodes + i) -> size);
+			}
+		}
+
+		return QCOW_NO_ERROR;
+	}
+	
+	const btrfs_internal_node_t* internal_nodes = QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t), btrfs_internal_node_t);
+	/* print_btrfs_internal_node_items(internal_nodes, header -> items_cnt); */
+	for (u64 i = 0; i < header -> items_cnt; ++i) {
+		const btrfs_key_t key = (internal_nodes + i) -> key;
+		DEBUG_LOG("item_type: %u, blockidx: %llu, generation: %llu\n", key.item_type, (internal_nodes + i) -> block_idx, (internal_nodes + i) -> generation);
+	}
+
+	return QCOW_NO_ERROR;
+}
+
+static int parse_chunk_root(qfs_btrfs_t* qfs_btrfs, const btrfs_superblock_t superblock) {
+	int err = 0;
+	
+	DEBUG_LOG("Parsing chunk root...\n");
 	u8* chunk_root = qcow_calloc(superblock.node_size, sizeof(u8));
 	if (chunk_root == NULL) {
 		WARNING_LOG("Failed to allocate chunk_root buffer.\n");
@@ -766,9 +1097,73 @@ static int parse_superblock(qfs_btrfs_t* qfs_btrfs) {
 	}
 
 	const btrfs_node_header_t* chunk_root_header = QCOW_CAST_PTR(chunk_root, btrfs_node_header_t);
-	print_btrfs_node_header(chunk_root_header);
-
+	parse_node_header(qfs_btrfs, chunk_root_header, superblock.sector_size);
+	
 	QCOW_SAFE_FREE(chunk_root);
+	
+	return QCOW_NO_ERROR;
+}
+
+static int parse_root_tree(qfs_btrfs_t* qfs_btrfs, const btrfs_superblock_t superblock) {
+	int err = 0;
+
+	DEBUG_LOG("Parsing root tree...\n");
+	u8* root_tree = qcow_calloc(superblock.node_size, sizeof(u8));
+	if (root_tree == NULL) {
+		WARNING_LOG("Failed to allocate root_tree buffer.\n");
+		return -QCOW_IO_ERROR;
+	}
+
+	u64 root_tree_lba = btrfs_lba_to_physical_lba(qfs_btrfs, superblock.root_tree_root_lba);
+	if (root_tree_lba % SECTOR_SIZE) {
+		WARNING_LOG("Trying to perform an unaligned sector read.");
+		return -QCOW_UNALIGNED_SECTOR;
+	}
+
+	root_tree_lba = qfs_btrfs -> start_lba + root_tree_lba / SECTOR_SIZE;
+	if (get_n_sector_at(root_tree_lba, superblock.node_size / SECTOR_SIZE, root_tree)) {
+		QCOW_SAFE_FREE(root_tree);
+		WARNING_LOG("Failed to get root_tree sectors.\n");
+		return -QCOW_IO_ERROR;
+	}
+	
+	if ((err = validate_chunk_tree(root_tree, superblock.node_size, superblock.fs_uuid, superblock.root_tree_root_lba, superblock.root_tree_level)) < 0) {
+		WARNING_LOG("Failed to validate chunk root tree.\n");
+		return err;
+	}
+
+	const btrfs_node_header_t* root_tree_header = QCOW_CAST_PTR(root_tree, btrfs_node_header_t);
+	parse_node_header(qfs_btrfs, root_tree_header, superblock.sector_size);
+	
+	QCOW_SAFE_FREE(root_tree);
+	
+	return QCOW_NO_ERROR;
+}
+
+static int parse_superblock(qfs_btrfs_t* qfs_btrfs) {
+	btrfs_superblock_t superblock = {0};
+	if (get_n_sector_at(qfs_btrfs -> start_lba + BTRFS_SUPERBLOCK_OFFSET, sizeof(btrfs_superblock_t) / SECTOR_SIZE, &superblock)) {
+		WARNING_LOG("Failed to get superblock sectors.\n");
+		return -QCOW_IO_ERROR;
+	}
+
+	int err = 0;
+	if ((err = validate_superblock(qfs_btrfs, &superblock)) < 0) {
+		WARNING_LOG("Failed to validate the superblock.\n");
+		return err;
+	}
+
+	print_btrfs_superblock(&superblock);
+	
+	if ((err = parse_chunk_root(qfs_btrfs, superblock)) < 0) {
+		WARNING_LOG("Failed to parse the chunk root.\n");
+		return err;
+	}
+
+	if ((err = parse_root_tree(qfs_btrfs, superblock)) < 0) {
+		WARNING_LOG("Failed to parse the chunk root.\n");
+		return err;
+	}
 
 	TODO("Implement me!");
 	return -QCOW_TODO;

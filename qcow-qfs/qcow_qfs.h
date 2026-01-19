@@ -282,17 +282,17 @@ int qfs_lookup(qfs_t* qfs, const qfs_node_t* dir, const char* s_name, qfs_node_t
 	}
 
 	if (node != NULL) {
-		node -> fat_node.size = fat_entry.size;
-		node -> fat_node.attr = fat_entry.attr;
+		node -> fat_node.size          = fat_entry.size;
+		node -> fat_node.attr          = fat_entry.attr;
 		node -> fat_node.first_cluster = ((u32) fat_entry.cluster_high << 16) | fat_entry.cluster_low;
-		node -> node_type = (fat_entry.attr & FAT_ATTR_DIRECTORY) ? QFS_DIRECTORY : QFS_FILE;
+		node -> node_type              = (fat_entry.attr & FAT_ATTR_DIRECTORY) ? QFS_DIRECTORY : QFS_FILE;
 	} else if (stat != NULL) {
-		stat -> size = fat_entry.size;
-		stat -> mode = (fat_entry.attr & FAT_ATTR_DIRECTORY) ? QFS_DIRECTORY : QFS_FILE;
-		stat -> mode |= (fat_entry.attr & FAT_ATTR_READ_ONLY) ? QFS_IRW : 0x00;
-		stat -> create_time = fat_time_to_qfs_time(fat_entry.cdate, fat_entry.ctime);
-		stat -> acc_time    = fat_time_to_qfs_time(fat_entry.adate, 0);
-		stat -> mod_time    = fat_time_to_qfs_time(fat_entry.mdate, fat_entry.mtime);
+		stat -> size         = fat_entry.size;
+		stat -> mode         = (fat_entry.attr & FAT_ATTR_DIRECTORY) ? QFS_DIRECTORY : QFS_FILE;
+		stat -> mode        |= (fat_entry.attr & FAT_ATTR_READ_ONLY) ? QFS_IRW : 0x00;
+		stat -> create_time  = fat_time_to_qfs_time(fat_entry.cdate, fat_entry.ctime);
+		stat -> acc_time     = fat_time_to_qfs_time(fat_entry.adate, 0);
+		stat -> mod_time     = fat_time_to_qfs_time(fat_entry.mdate, fat_entry.mtime);
 	}
 			
 	return QCOW_NO_ERROR;
