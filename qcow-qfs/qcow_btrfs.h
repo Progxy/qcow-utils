@@ -502,6 +502,7 @@ static void print_btrfs_time(const btrfs_time_t* time) {
 	secs -= hours;
 	hours /= 3600;
 
+	secs += 3600 * 24;
 	u32 year = 1970;
 	while (secs > (365 + (year % 4 == 0)) * (3600 * 24)) {
 		secs -= (365 + (year % 4 == 0)) * (3600 * 24);	
@@ -515,7 +516,7 @@ static void print_btrfs_time(const btrfs_time_t* time) {
 	}
 	month++;
 	
-	const u32 day = 1 + secs / (3600 * 24);
+	const u32 day = secs / (3600 * 24);
 	
 	printf("%02u:%02u:%02u:%u %02u/%02u/%04u", hours, minutes, seconds, time -> nanosecs, day, month, year);
 	
@@ -1031,6 +1032,7 @@ static int parse_node_header(qfs_btrfs_t* qfs_btrfs, const btrfs_node_header_t* 
 					return err;
 				}
 			} else if (key.item_type == BTRFS_ROOT_ITEM_KEY) {
+				printf("Obj ID: 0x%llX\n", key.obj_id);
 				const btrfs_root_item_t* root_item = QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t) + (leaf_nodes + i) -> offset, btrfs_root_item_t);
 				print_btrfs_root_item(root_item);
 			} else if (key.item_type == BTRFS_INODE_REF_KEY) {
