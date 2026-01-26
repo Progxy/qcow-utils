@@ -78,6 +78,8 @@ typedef enum {
 	BTRFS_EXTENT_ITEM_KEY       = 0xA8,
 	BTRFS_METADATA_ITEM_KEY     = 0xA9,
 	BTRFS_BLOCK_GROUP_KEY       = 0xC0,
+	BTRFS_FREE_SPACE_INFO_KEY   = 0xC6,
+	BTRFS_FREE_SPACE_EXTENT_KEY = 0xC7,
 	BTRFS_FREE_SPACE_BITMAP_KEY = 0xC8,
 	BTRFS_DEV_EXTENT_KEY        = 0xCC,
 	BTRFS_DEV_ITEM_KEY          = 0xD8,
@@ -548,6 +550,11 @@ typedef struct PACKED_STRUCT {
 	guid_t chunk_tree_uuid;
 } btrfs_dev_extent_t;
 
+typedef struct PACKED_STRUCT {
+	u32 extent_count;
+	u32 flags;
+} btrfs_free_space_info_t;
+
 // Validate Structs Sizes
 STATIC_ASSERT(sizeof(btrfs_time_t)          == BTRFS_TIME_SIZE,          "BTRFS time size mismatch");
 STATIC_ASSERT(sizeof(btrfs_key_t)           == BTRFS_KEY_SIZE,           "BTRFS key size mismatch");
@@ -592,6 +599,29 @@ static void print_btrfs_dev_stats(const u64* dev_stats, const char* prefix, cons
 	printf("---------------------------\n");
 	return;
 }
+
+static void print_btrfs_free_space_info(const btrfs_key_t* key, const btrfs_free_space_info_t* free_space_info, const char* prefix) {
+	printf(" -- Free Space Info --\n");
+	printf("%s  -> size:         0x%llX\n", prefix, key -> offset);
+	printf("%s  -> offset:       0x%llX\n", prefix, key -> obj_id);
+	printf("%s  -> extent_count: 0x%X\n", prefix, free_space_info -> extent_count);
+	printf("%s  -> flags:        0x%X\n", prefix, free_space_info -> flags);
+	printf("---------------------------\n");
+	return;
+} 
+
+static void print_btrfs_free_space_bitmap(const btrfs_key_t* key, const u8* free_space_bitmap, const char* prefix, const u64 size) {
+	printf(" -- Free Space Bitmap from %llX to %llX --\n", key -> obj_id, key -> obj_id + key -> offset);
+	for (u64 i = 0, t = 0; i < size; i += 8, ++t) {
+		printf("%s\t", prefix);
+		for (u8 j = 0; j < 8; ++j) {
+			printf("%01u ", (free_space_bitmap[t] >> j) & 0x01);
+		}
+		printf("\n");
+	}
+	printf("---------------------------\n");
+	return;
+} 
 
 static void print_btrfs_dev_extent(const btrfs_dev_extent_t* dev_extent, const char* prefix) {
 	printf(" -- Dev Extent --\n");
@@ -1279,7 +1309,7 @@ static int parse_node_header(qfs_btrfs_t* qfs_btrfs, const btrfs_superblock_t su
 					/* err = parse_root_tree(qfs_btrfs, superblock, "uuid", root_item -> bytenr, NULL, root_item -> level); */
 				} else if (key.obj_id == BTRFS_FREE_SPACE_TREE_OBJECTID) {
 					DEBUG_LOG("Found Free Space Root Tree.\n");
-					err = parse_root_tree(qfs_btrfs, superblock, "free space", root_item -> bytenr, NULL, root_item -> level);
+					/* err = parse_root_tree(qfs_btrfs, superblock, "free space", root_item -> bytenr, NULL, root_item -> level); */
 				}
 
 				if (err < 0) {
@@ -1343,9 +1373,20 @@ static int parse_node_header(qfs_btrfs_t* qfs_btrfs, const btrfs_superblock_t su
 			   	print_guid(uuid);
 				printf("\n");
 				printf("--------------------------------\n");
+			} else if (key.item_type == BTRFS_FREE_SPACE_INFO_KEY) {
+				const btrfs_free_space_info_t* free_space_info = QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t) + (leaf_nodes + i) -> offset, btrfs_free_space_info_t);
+				print_btrfs_free_space_info(&key, free_space_info, "    ");
+			} else if (key.item_type == BTRFS_FREE_SPACE_BITMAP_KEY) {
+				const u8* free_space_info = QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t) + (leaf_nodes + i) -> offset;
+				print_btrfs_free_space_bitmap(&key, free_space_info, "    ", (leaf_nodes + i) -> size);
+			} else if (key.item_type == BTRFS_FREE_SPACE_EXTENT_KEY) {
+				printf(" -- Free Space Extent --\n");
+				printf("  -> size: %llX\n", key.offset);
+				printf("  -> offset: %llX\n", key.obj_id);
+				printf("--------------------------------\n");
 			} else {
 				DEBUG_LOG("  -> leaf_node %llu:\n", i);
-				print_btrfs_key(&((leaf_nodes + i) -> key), "    ");
+				print_btrfs_key(&key, "    ");
 				printf("      -> offset: 0x%X\n", (leaf_nodes + i) -> offset);
 				printf("      -> size:   %u\n", (leaf_nodes + i) -> size);
 			}
