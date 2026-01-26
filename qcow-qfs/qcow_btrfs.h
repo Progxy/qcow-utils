@@ -61,7 +61,8 @@ typedef enum {
 	BTRFS_FS_TREE_OBJECTID          = 5,
 	BTRFS_CSUM_TREE_OBJECTID        = 7,
 	BTRFS_UUID_TREE_OBJECTID        = 9,
-	BTRFS_FREE_SPACE_TREE_OBJECTID  = 10
+	BTRFS_FREE_SPACE_TREE_OBJECTID  = 10,
+	BTRFS_DATA_RELOC_TREE_OBJECTID  = -9
 } BtrfsObjectIds;
 
 typedef enum {
@@ -1310,6 +1311,12 @@ static int parse_node_header(qfs_btrfs_t* qfs_btrfs, const btrfs_superblock_t su
 				} else if (key.obj_id == BTRFS_FREE_SPACE_TREE_OBJECTID) {
 					DEBUG_LOG("Found Free Space Root Tree.\n");
 					/* err = parse_root_tree(qfs_btrfs, superblock, "free space", root_item -> bytenr, NULL, root_item -> level); */
+				} else if (((s64) key.obj_id) >= BTRFS_FIRST_FREE_OBJECTID || ((s64) key.obj_id) <= BTRFS_LAST_FREE_OBJECTID) {
+					DEBUG_LOG("Found File Tree %lld.\n", key.obj_id);
+					/* err = parse_root_tree(qfs_btrfs, superblock, "file", root_item -> bytenr, NULL, root_item -> level); */
+				} else if (key.obj_id == (u64) BTRFS_DATA_RELOC_TREE_OBJECTID) {
+					DEBUG_LOG("Found Data Reloc Tree.\n");
+					/* err = parse_root_tree(qfs_btrfs, superblock, "data reloc", root_item -> bytenr, NULL, root_item -> level); */
 				}
 
 				if (err < 0) {
