@@ -1267,8 +1267,7 @@ static inline u64 btrfs_lba_to_physical_lba(const qfs_btrfs_t* qfs_btrfs, u64 bt
 	return -1ULL;
 }
 
-
-static int parse_root_tree(qfs_btrfs_t* qfs_btrfs, const btrfs_superblock_t superblock, const char* root_tree_name, const u64 root_tree_lba, const guid_t fs_uuid, const u8 root_level);
+static int parse_btree(qfs_btrfs_t* qfs_btrfs, const btrfs_superblock_t superblock, const char* btree_name, const u64 btree_lba, const guid_t fs_uuid, const u8 level);
 
 static int parse_node_header(qfs_btrfs_t* qfs_btrfs, const btrfs_superblock_t superblock, const btrfs_node_header_t* header, const u32 sector_size) {
 	print_btrfs_node_header(header);
@@ -1295,28 +1294,28 @@ static int parse_node_header(qfs_btrfs_t* qfs_btrfs, const btrfs_superblock_t su
 				print_btrfs_root_item(root_item);
 				if (key.obj_id == BTRFS_FS_TREE_OBJECTID) {
 					DEBUG_LOG("Found FS Root Tree.\n");
-					/* err = parse_root_tree(qfs_btrfs, superblock, "fs", root_item -> bytenr, NULL, root_item -> level); */
+					/* err = parse_btree(qfs_btrfs, superblock, "fs", root_item -> bytenr, NULL, root_item -> level); */
 				} else if (key.obj_id == BTRFS_EXTENT_TREE_OBJECTID) {
 					DEBUG_LOG("Found Extent Root Tree.\n");
-					/* err = parse_root_tree(qfs_btrfs, superblock, "extent", root_item -> bytenr, NULL, root_item -> level); */
+					/* err = parse_btree(qfs_btrfs, superblock, "extent", root_item -> bytenr, NULL, root_item -> level); */
 				} else if (key.obj_id == BTRFS_DEV_TREE_OBJECTID) {
 					DEBUG_LOG("Found Dev Root Tree.\n");
-					/* err = parse_root_tree(qfs_btrfs, superblock, "dev", root_item -> bytenr, NULL, root_item -> level); */
+					/* err = parse_btree(qfs_btrfs, superblock, "dev", root_item -> bytenr, NULL, root_item -> level); */
 				} else if (key.obj_id == BTRFS_CSUM_TREE_OBJECTID) {
 					DEBUG_LOG("Found CSum Root Tree.\n");
-					/* err = parse_root_tree(qfs_btrfs, superblock, "csum", root_item -> bytenr, NULL, root_item -> level); */
+					/* err = parse_btree(qfs_btrfs, superblock, "csum", root_item -> bytenr, NULL, root_item -> level); */
 				} else if (key.obj_id == BTRFS_UUID_TREE_OBJECTID) {
 					DEBUG_LOG("Found UUID Root Tree.\n");
-					/* err = parse_root_tree(qfs_btrfs, superblock, "uuid", root_item -> bytenr, NULL, root_item -> level); */
+					/* err = parse_btree(qfs_btrfs, superblock, "uuid", root_item -> bytenr, NULL, root_item -> level); */
 				} else if (key.obj_id == BTRFS_FREE_SPACE_TREE_OBJECTID) {
 					DEBUG_LOG("Found Free Space Root Tree.\n");
-					/* err = parse_root_tree(qfs_btrfs, superblock, "free space", root_item -> bytenr, NULL, root_item -> level); */
+					/* err = parse_btree(qfs_btrfs, superblock, "free space", root_item -> bytenr, NULL, root_item -> level); */
 				} else if (((s64) key.obj_id) >= BTRFS_FIRST_FREE_OBJECTID || ((s64) key.obj_id) <= BTRFS_LAST_FREE_OBJECTID) {
 					DEBUG_LOG("Found File Tree %lld.\n", key.obj_id);
-					/* err = parse_root_tree(qfs_btrfs, superblock, "file", root_item -> bytenr, NULL, root_item -> level); */
+					/* err = parse_btree(qfs_btrfs, superblock, "file", root_item -> bytenr, NULL, root_item -> level); */
 				} else if (key.obj_id == (u64) BTRFS_DATA_RELOC_TREE_OBJECTID) {
 					DEBUG_LOG("Found Data Reloc Tree.\n");
-					/* err = parse_root_tree(qfs_btrfs, superblock, "data reloc", root_item -> bytenr, NULL, root_item -> level); */
+					/* err = parse_btree(qfs_btrfs, superblock, "data reloc", root_item -> bytenr, NULL, root_item -> level); */
 				}
 
 				if (err < 0) {
@@ -1396,6 +1395,7 @@ static int parse_node_header(qfs_btrfs_t* qfs_btrfs, const btrfs_superblock_t su
 				print_btrfs_key(&key, "    ");
 				printf("      -> offset: 0x%X\n", (leaf_nodes + i) -> offset);
 				printf("      -> size:   %u\n", (leaf_nodes + i) -> size);
+				return -QCOW_UNKNOWN_ITEM_TYPE;
 			}
 		}
 
@@ -1404,7 +1404,7 @@ static int parse_node_header(qfs_btrfs_t* qfs_btrfs, const btrfs_superblock_t su
 	
 	const btrfs_internal_node_t* internal_nodes = QCOW_CAST_PTR(QCOW_CAST_PTR(header, u8) + sizeof(btrfs_node_header_t), btrfs_internal_node_t);
 	for (u64 i = 0; i < header -> items_cnt; ++i) {
-		int err = parse_root_tree(qfs_btrfs, superblock, "internal node", (internal_nodes + i) -> block_idx, NULL, header -> level - 1);
+		int err = parse_btree(qfs_btrfs, superblock, "internal node", (internal_nodes + i) -> block_idx, NULL, header -> level - 1);
 		if (err < 0) {
 			const btrfs_key_t key = (internal_nodes + i) -> key;
 			WARNING_LOG("An error occurred while parsing the item.\n");
@@ -1416,49 +1416,49 @@ static int parse_node_header(qfs_btrfs_t* qfs_btrfs, const btrfs_superblock_t su
 	return QCOW_NO_ERROR;
 }
 
-static int parse_root_tree(qfs_btrfs_t* qfs_btrfs, const btrfs_superblock_t superblock, const char* root_tree_name, const u64 root_tree_lba, const guid_t fs_uuid, const u8 root_level) {
+static int parse_btree(qfs_btrfs_t* qfs_btrfs, const btrfs_superblock_t superblock, const char* btree_name, const u64 btree_lba, const guid_t fs_uuid, const u8 level) {
 	int err = 0;
 	
-	DEBUG_LOG("Parsing '%s' root tree...\n", root_tree_name);
-	u8* root_tree = qcow_calloc(superblock.node_size, sizeof(u8));
-	if (root_tree == NULL) {
-		WARNING_LOG("Failed to allocate root_tree buffer.\n");
+	DEBUG_LOG("Parsing '%s' btree...\n", btree_name);
+	u8* btree = qcow_calloc(superblock.node_size, sizeof(u8));
+	if (btree == NULL) {
+		WARNING_LOG("Failed to allocate btree buffer.\n");
 		return -QCOW_IO_ERROR;
 	}
 
-	u64 root_tree_btrfs_lba = btrfs_lba_to_physical_lba(qfs_btrfs, root_tree_lba);
+	u64 btree_btrfs_lba = btrfs_lba_to_physical_lba(qfs_btrfs, btree_lba);
 	// TODO: Should use the correct sector_size
-	/* if (root_tree_btrfs_lba % superblock.sector_size) { */
-	if (root_tree_btrfs_lba % SECTOR_SIZE) {
+	/* if (btree_btrfs_lba % superblock.sector_size) { */
+	if (btree_btrfs_lba % SECTOR_SIZE) {
 		WARNING_LOG("Trying to perform an unaligned sector read.");
 		return -QCOW_UNALIGNED_SECTOR;
 	}
 
-	root_tree_btrfs_lba = qfs_btrfs -> start_lba + root_tree_btrfs_lba / SECTOR_SIZE;
-	if (get_n_sector_at(root_tree_btrfs_lba, superblock.node_size / SECTOR_SIZE, root_tree)) {
-		QCOW_SAFE_FREE(root_tree);
-		WARNING_LOG("Failed to get root_tree sectors.\n");
+	btree_btrfs_lba = qfs_btrfs -> start_lba + btree_btrfs_lba / SECTOR_SIZE;
+	if (get_n_sector_at(btree_btrfs_lba, superblock.node_size / SECTOR_SIZE, btree)) {
+		QCOW_SAFE_FREE(btree);
+		WARNING_LOG("Failed to get btree sectors.\n");
 		return -QCOW_IO_ERROR;
 	}
 
-	err = validate_chunk_tree(root_tree, superblock.node_size, fs_uuid, root_tree_lba, root_level);
+	err = validate_chunk_tree(btree, superblock.node_size, fs_uuid, btree_lba, level);
 	if (err == -QCOW_EMPTY_TREE) {
-		QCOW_SAFE_FREE(root_tree);
+		QCOW_SAFE_FREE(btree);
 		return QCOW_NO_ERROR;
 	} else if (err < 0) {
-		WARNING_LOG("Failed to validate chunk root tree.\n");
+		WARNING_LOG("Failed to validate '%s' btree.\n", btree_name);
 		return err;
 	}
 
-	const btrfs_node_header_t* root_tree_header = QCOW_CAST_PTR(root_tree, btrfs_node_header_t);
-	if ((err = parse_node_header(qfs_btrfs, superblock, root_tree_header, superblock.sector_size)) < 0) {
+	const btrfs_node_header_t* btree_header = QCOW_CAST_PTR(btree, btrfs_node_header_t);
+	if ((err = parse_node_header(qfs_btrfs, superblock, btree_header, superblock.sector_size)) < 0) {
 		WARNING_LOG("Failed to parse node header.\n");
 		return err;
 	}
 	
-	QCOW_SAFE_FREE(root_tree);
+	QCOW_SAFE_FREE(btree);
 	
-	DEBUG_LOG("%s root tree successfully parsed.\n", root_tree_name);
+	DEBUG_LOG("'%s' btree successfully parsed.\n", btree_name);
 
 	return QCOW_NO_ERROR;
 }
@@ -1478,12 +1478,12 @@ static int parse_superblock(qfs_btrfs_t* qfs_btrfs) {
 
 	print_btrfs_superblock(&superblock);
 	
-	if ((err = parse_root_tree(qfs_btrfs, superblock, "chunk", superblock.chunk_tree_root_lba, superblock.fs_uuid, superblock.chunk_root_level)) < 0) {
+	if ((err = parse_btree(qfs_btrfs, superblock, "chunk", superblock.chunk_tree_root_lba, superblock.fs_uuid, superblock.chunk_root_level)) < 0) {
 		WARNING_LOG("Failed to parse the chunk root.\n");
 		return err;
 	}
 
-	if ((err = parse_root_tree(qfs_btrfs, superblock, "root", superblock.root_tree_root_lba, superblock.fs_uuid, superblock.root_tree_level)) < 0) {
+	if ((err = parse_btree(qfs_btrfs, superblock, "root", superblock.root_tree_root_lba, superblock.fs_uuid, superblock.root_tree_level)) < 0) {
 		WARNING_LOG("Failed to parse the chunk root.\n");
 		return err;
 	}
